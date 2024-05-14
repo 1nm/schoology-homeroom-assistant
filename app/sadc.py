@@ -257,6 +257,7 @@ class SchoologyAlbumsDownloader:
 
             # Extract main content
             content_span = post.find('span', {'class': 'update-body s-rte'})
+            html_content = content_span.prettify() if content_span else ''
             content = content_span.get_text() if content_span else ''
 
             # Check if there is a "Show More" link
@@ -278,6 +279,7 @@ class SchoologyAlbumsDownloader:
                         # Parse the additional content using BeautifulSoup
                         additional_content_soup = BeautifulSoup(
                             data, 'html.parser')
+                        html_content = additional_content_soup.prettify()
                         content = additional_content_soup.get_text()
                         images = [
                             img.get('src', '') for img in additional_content_soup.find_all('img')]
@@ -288,7 +290,7 @@ class SchoologyAlbumsDownloader:
                 'author': author_name,
                 'profile_pic_url': profile_pic_url,
                 'content': content.strip(),
-                'html_content': content,
+                'html_content': html_content,
                 'show_more_href': show_more_href,
                 'images': images
             })
