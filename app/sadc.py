@@ -462,7 +462,7 @@ def main():
             bcc_emails_env = os.environ.get("BCC_EMAILS")
             bcc_emails = bcc_emails_env.split(',') if bcc_emails_env else []
             logging.info(f"Sending email to {summary_sender_email} and BCC to {bcc_emails}")
-            markdown_content = f"On {post['datetime']}, {post['author']} posted:" + '\n<br/><br/>\n' + post['html_content'] + '\n<br/><br/>\n' + summary
+            markdown_content = f"On {post['datetime']}, {post['author']} posted:" + '\n<br/><br/>\n' + post['html_content'] + '\n<hr/>\n' + summary
             send_email(summary_sender_email, summary_sender_email, bcc_emails, f"Schoology Update Summary {post_date_ymd}", markdown_content)
             downloader.config['updates'][post['post_id']] = post
     downloader._save_config()
