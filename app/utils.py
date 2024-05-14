@@ -24,7 +24,7 @@ PROMPT_TEMPLATE = """
 
     Example:
     ```
-    # Update Summary from Eri Ozawa, Homeroom Teacher
+    # AI Summary
     ## Actionable Items
     1. **UOI Animal Book Presentation Sign-Up:**
         - Choose three available slots (June 4, 5, 6 at 8:10-8:25 or 15:30-15:45) and email them to the teacher.
@@ -53,6 +53,8 @@ TRANSLATION_PROMPT_TEMPLATE = """
     ```
     {content}
     ```
+
+    Translation in markdown format, no triple backticks:
 """
 
 def summarize(text):
