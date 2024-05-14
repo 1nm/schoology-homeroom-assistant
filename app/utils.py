@@ -15,7 +15,7 @@ PROMPT_TEMPLATE = """
     List all the action items and information for the parents, group them by actionable and informational.
     Output in the following example markdown formatting.
 
-    The document starts with a title, formatted with a #.
+    The document starts with a title "AI Summary", formatted with a #.
     Each update summary is divided into two sections: "Actionable Items" and "Informational Items", each marked with a ##.
     Under "Actionable Items", there are numbered bullet points (1., 2., etc.), each containing a bolded item name.
     Each bolded item name has lower-level bullet points (-) with specific details or actions.
