@@ -16,8 +16,8 @@ PROMPT_TEMPLATE = """
     Output in the following example markdown formatting.
     The document starts with a title, formatted with a #.
     Each update summary is divided into two sections: "Actionable Items" and "Informational Items", each marked with a ##.
-    Under "Actionable Items", there are numbered bullet points (1., 2., etc.), each containing a bolded item name and a list of actions.
-    Under "Informational Items", there are also numbered bullet points, each containing a bolded item name and a piece of information.
+    Under "Actionable Items", there are numbered bullet points (1., 2., etc.), each containing a bolded item name, and a list of actions, each marked with a -.
+    Under "Informational Items", there are also numbered bullet points, each containing a bolded item name and a list of information, each marked with a -.
 
     Update from Homeroom Teacher:
     ```
