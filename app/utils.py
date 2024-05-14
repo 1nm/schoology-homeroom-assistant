@@ -14,10 +14,30 @@ PROMPT_TEMPLATE = """
     Summarize the update from my daughter's homeroom teacher.
     List all the action items and information for the parents, group them by actionable and informational.
     Output in the following example markdown formatting.
+
     The document starts with a title, formatted with a #.
     Each update summary is divided into two sections: "Actionable Items" and "Informational Items", each marked with a ##.
-    Under "Actionable Items", there are numbered bullet points (1., 2., etc.), each containing a bolded item name, and a list of actions, each marked with a -.
-    Under "Informational Items", there are also numbered bullet points, each containing a bolded item name and a list of information, each marked with a -.
+    Under "Actionable Items", there are numbered bullet points (1., 2., etc.), each containing a bolded item name.
+    Each bolded item name has lower-level bullet points (-) with specific details or actions.
+    Under "Informational Items", there are also numbered bullet points, each containing a bolded item name.
+    Each bolded item name under "Informational Items" can also have lower-level bullet points with additional details.
+
+    Example:
+    ```
+    # Update Summary from Eri Ozawa, Homeroom Teacher
+    ## Actionable Items
+    1. **UOI Animal Book Presentation Sign-Up:**
+        - Choose three available slots (June 4, 5, 6 at 8:10-8:25 or 15:30-15:45) and email them to the teacher.
+        - If selecting a morning slot, come to school with your child.
+    2. **Field Trip to the Zoo:**
+        - Prepare for the trip and ensure your child is ready for the outing.
+
+    ## Informational Items
+    1. **Mother's Day:**
+        - A secret present is in the children’s backpacks made by them.
+    2. **Upcoming Events:**
+        - May 17 and 24: Riverside Park visits
+    ```
 
     Update from Homeroom Teacher:
     ```
