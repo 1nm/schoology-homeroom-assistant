@@ -47,6 +47,14 @@ PROMPT_TEMPLATE = """
     Summary in markdown format, no triple backticks:
 """
 
+TRANSLATION_PROMPT_TEMPLATE = """
+    Translate the following content into {language}, keep the original markdown formatting.
+    
+    ```
+    {text}
+    ```
+"""
+
 def summarize(text):
     prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
     output_parser = StrOutputParser()
@@ -61,6 +69,30 @@ def summarize(text):
     response = chain.invoke(text)
     return response
 
+def translate(markdown_content, language):
+    """
+    Translate Markdown content to the specified language.
+
+    Parameters:
+    - markdown_content: Content in Markdown format.
+    - language: Target language for translation.
+
+    Returns:
+    - Translated content in Markdown format.
+    """
+    # Set up the translation client
+    prompt = ChatPromptTemplate.from_template(TRANSLATION_PROMPT_TEMPLATE)
+    output_parser = StrOutputParser()
+    model = ChatOpenAI(model="gpt-4o")
+    chain = (
+        {"text": RunnablePassthrough(), "language": language} 
+        | prompt
+        | model
+        | output_parser
+    )
+
+    response = chain.invoke(markdown_content)
+    return response
 
 
 def send_email(sender_email, receiver_email, bcc_emails, subject, markdown_content):

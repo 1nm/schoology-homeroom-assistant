@@ -17,7 +17,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from utils import send_email, summarize
+from utils import send_email, summarize, translate
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s",
                     level=logging.INFO)
@@ -457,12 +457,13 @@ def main():
         if not post['post_id'] in downloader.config['updates']:
             update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}"
             summary = summarize(update_content)
+            japanese_summary = translate(summary, "Japanese")
             post_date_ymd = post['datetime'].split(' ')[0]
             summary_sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
             bcc_emails_env = os.environ.get("BCC_EMAILS")
             bcc_emails = bcc_emails_env.split(',') if bcc_emails_env else []
             logging.info(f"Sending email to {summary_sender_email} and BCC to {bcc_emails}")
-            markdown_content = f"On {post['datetime']}, {post['author']} posted:" + '\n<br/><br/>\n' + post['html_content'] + '\n<hr/>\n' + summary
+            markdown_content = f"On {post['datetime']}, {post['author']} posted:" + '\n<br/><br/>\n' + post['html_content'] + '\n<hr/>\n' + summary + '\n<hr/>\n' + japanese_summary
             send_email(summary_sender_email, summary_sender_email, bcc_emails, f"Schoology Update Summary {post_date_ymd}", markdown_content)
             downloader.config['updates'][post['post_id']] = post
     downloader._save_config()
