@@ -268,6 +268,8 @@ class SchoologyAlbumsDownloader:
                       for img in content_span.find_all('img')]
 
             if show_more_href:
+                logging.info(
+                    f"Loading additional content for post {post_id} ...")
                 with self.session.post(f"{self._base_url}{show_more_href}",
                                        stream=True,
                                        allow_redirects=True) as r:
@@ -453,11 +455,12 @@ def main():
         if not post['post_id'] in downloader.config['updates']:
             update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}"
             summary = summarize(update_content)
-            today = time.strftime("%Y-%m-%d")
+            post_date_ymd = post['datetime'].strftime("%Y-%m-%d")
             summary_sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
             bcc_emails_env = os.environ.get("BCC_EMAILS")
             bcc_emails = bcc_emails_env.split(',') if bcc_emails_env else []
-            send_email(summary_sender_email, summary_sender_email, bcc_emails, f"Schoology Update Summary {today}", post['html_content'] + '\n<br/><br/>\n' + summary)
+            logging.info(f"Sending email to {summary_sender_email} and BCC to {bcc_emails}")
+            send_email(summary_sender_email, summary_sender_email, bcc_emails, f"Schoology Update Summary {post_date_ymd}", post['html_content'] + '\n<br/><br/>\n' + summary)
             downloader.config['updates'][post['post_id']] = post
     downloader._save_config()
 
