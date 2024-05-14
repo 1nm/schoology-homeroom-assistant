@@ -248,7 +248,7 @@ class SchoologyAlbumsDownloader:
             post_datetime = post_datetime.text if post_datetime else ''
             if post_datetime:
                 try:
-                    parsed_datetime = datetime.strptime("%a %b %d, %Y at %I:%M %p")
+                    parsed_datetime = datetime.strptime(post_datetime, "%a %b %d, %Y at %I:%M %p")
                 except ValueError:
                     logging.error(
                         f"Failed to parse datetime for post {post_id}")
