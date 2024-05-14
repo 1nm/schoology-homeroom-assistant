@@ -51,7 +51,7 @@ TRANSLATION_PROMPT_TEMPLATE = """
     Translate the following content into {language}, keep the original markdown formatting.
     
     ```
-    {text}
+    {content}
     ```
 """
 
@@ -60,13 +60,12 @@ def summarize(text):
     output_parser = StrOutputParser()
     model = ChatOpenAI(model="gpt-4o")
     chain = (
-        {"text": RunnablePassthrough()} 
-        | prompt
+        prompt
         | model
         | output_parser
     )
 
-    response = chain.invoke(text)
+    response = chain.invoke({'text': text})
     return response
 
 def translate(markdown_content, language):
@@ -85,13 +84,12 @@ def translate(markdown_content, language):
     output_parser = StrOutputParser()
     model = ChatOpenAI(model="gpt-4o")
     chain = (
-        {"text": RunnablePassthrough(), "language": language} 
-        | prompt
+        prompt
         | model
         | output_parser
     )
 
-    response = chain.invoke(markdown_content)
+    response = chain.invoke({'content': markdown_content, 'language': language})
     return response
 
 
