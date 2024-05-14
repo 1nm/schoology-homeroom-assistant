@@ -458,7 +458,7 @@ def main():
             update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}"
             summary = summarize(update_content)
             japanese_summary = translate(summary, "Japanese")
-            post_date_ymd = post['datetime'].split(' ')[0]
+            post_date_ymd = ' '.join(post['datetime'].split(' ')[1:4])
             summary_sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
             bcc_emails_env = os.environ.get("BCC_EMAILS")
             bcc_emails = bcc_emails_env.split(',') if bcc_emails_env else []
