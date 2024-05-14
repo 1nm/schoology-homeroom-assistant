@@ -13,28 +13,31 @@ from langchain_openai import ChatOpenAI
 PROMPT_TEMPLATE = """
     Summarize the update from my daughter's homeroom teacher.
     List all the action items and information for the parents, group them by actionable and informational.
-    Output in the following example markdown formatting, delimited with triple backticks.
+    Output in the following example markdown formatting.
 
     Example:
+    ```
     # Update Summary from Eri Ozawa, Homeroom Teacher
     ## Actionable Items
     1. **UOI Animal Book Presentation Sign-Up:**
-        - Choose three available slots (June 4, 5, 6 at 8:10-8:25 or 15:30-15:45) and email them to the teacher.
-        - If selecting a morning slot, come to school with your child.
+       - Choose three available slots (June 4, 5, 6 at 8:10-8:25 or 15:30-15:45) and email them to the teacher.
+       - If selecting a morning slot, come to school with your child.
     2. **Field Trip to the Zoo:**
-        - Prepare for the trip and ensure your child is ready for the outing.
+       - Prepare for the trip and ensure your child is ready for the outing.
+
     ## Informational Items
     1. **Mother's Day:**
-        - A secret present is in the children’s backpacks made by them.
+       - A secret present is in the children’s backpacks made by them.
     2. **Upcoming Events:**
-        - May 17 and 24: Riverside Park visits
-
+       - May 17 and 24: Riverside Park visits
+    ```
 
     Update from Homeroom Teacher:
+    ```
     {text}
+    ```
 
-
-    Summary:
+    Summary in markdown format, no triple backticks:
 """
 
 def summarize(text):
