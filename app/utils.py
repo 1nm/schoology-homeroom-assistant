@@ -1,3 +1,4 @@
+import logging
 import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -12,10 +13,28 @@ from langchain_openai import ChatOpenAI
 PROMPT_TEMPLATE = """
     Summarize the update from my daughter's homeroom teacher.
     List all the action items and information for the parents, group them by actionable and informational.
-    Output in markdown formatting.
+    Output in the following example markdown formatting.
+    Example:
+    ```
+    # Update Summary from Eri Ozawa, Homeroom Teacher
+    ## Actionable Items
+    1. UOI Animal Book Presentation Sign-Up:
+        - Choose three available slots (June 4, 5, 6 at 8:10-8:25 or 15:30-15:45) and email them to the teacher.
+        - If selecting a morning slot, come to school with your child.
+    2. Field Trip to the Zoo:
+        - Prepare for the trip and ensure your child is ready for the outing.
+    
+    ## Informational Items
+    1. Mother's Day:
+        - A secret present is in the children’s backpacks made by them.
+    2. Upcoming Events:
+        - May 17 and 24: Riverside Park visits
+    ```
+    Update from Homeroom Teacher:
     ```
     {text}
     ```
+    Summary:
 """
 
 def summarize(text):
@@ -75,24 +94,6 @@ def send_email(sender_email, receiver_email, bcc_emails, subject, markdown_conte
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(sender_email, app_password)
             server.sendmail(sender_email, all_recipients, msg.as_string())
-        print("Email sent successfully!")
+        logging.info("Email sent successfully!")
     except Exception as e:
-        print(f"Failed to send email: {e}")
-
-# Example usage
-if __name__ == "__main__":
-    sender_email = "you@example.com"
-    receiver_email = "you@example.com"
-    bcc_emails = ["parent@example.com"]
-    subject = "Test Email with Markdown"
-    markdown_content = """
-    # Hello
-
-    This is a **test email** sent from Python using Google's SMTP server with BCC.
-
-    - Item 1
-    - Item 2
-    - Item 3
-    """
-
-    send_email(sender_email, receiver_email, bcc_emails, subject, markdown_content)
+        logging.info(f"Failed to send email: {e}")
