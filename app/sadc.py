@@ -455,7 +455,8 @@ def main():
             summary = summarize(update_content)
             today = time.strftime("%Y-%m-%d")
             summary_sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
-            bcc_emails = os.environ.get("BCC_EMAILS").split(',')
+            bcc_emails_env = os.environ.get("BCC_EMAILS")
+            bcc_emails = bcc_emails_env.split(',') if bcc_emails_env else []
             send_email(summary_sender_email, summary_sender_email, bcc_emails, f"Schoology Update Summary {today}", post['html_content'] + '\n<br/><br/>\n' + summary)
             downloader.config['updates'][post['post_id']] = post
     downloader._save_config()
