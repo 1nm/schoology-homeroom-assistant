@@ -12,35 +12,18 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 from dotenv import find_dotenv, load_dotenv
-from linebot import LineBotApi, WebhookHandler
-from linebot.models import ImageSendMessage, TextSendMessage
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-
-from summarizer import summarize
+from utils import send_email, summarize
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s",
                     level=logging.INFO)
 
 
 load_dotenv(find_dotenv(usecwd=True))
-
-
-channel_secret = os.getenv('LINE_CHANNEL_SECRET', None)
-line_group_id = os.getenv('LINE_GROUP_ID', None)
-channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN', None)
-if channel_secret is None:
-    print('Specify LINE_CHANNEL_SECRET as environment variable.')
-    sys.exit(1)
-if channel_access_token is None:
-    print('Specify LINE_CHANNEL_ACCESS_TOKEN as environment variable.')
-    sys.exit(1)
-
-line_bot_api = LineBotApi(channel_access_token)
-handler = WebhookHandler(channel_secret)
 
 
 class SchoologyAlbumsDownloader:
@@ -303,6 +286,7 @@ class SchoologyAlbumsDownloader:
                 'author': author_name,
                 'profile_pic_url': profile_pic_url,
                 'content': content.strip(),
+                'html_content': content,
                 'show_more_href': show_more_href,
                 'images': images
             })
@@ -469,28 +453,10 @@ def main():
         if not post['post_id'] in downloader.config['updates']:
             update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}"
             summary = summarize(update_content)
-            # Split the update_content into 4900 characters chunks
-            chunks = [update_content[i:i + 4900]
-                      for i in range(0, len(update_content), 4900)]
-            for chunk in chunks:
-                line_bot_api.push_message(
-                    line_group_id,
-                    TextSendMessage(text=chunk)
-                )
-            for image in post['images']:
-                line_bot_api.push_message(
-                    line_group_id,
-                    ImageSendMessage(
-                        original_content_url=image,
-                        preview_image_url=image
-                    )
-                )
-            # logging.info(summary)
-            line_bot_api.push_message(
-                line_group_id,
-                TextSendMessage(
-                    text=f"AI Summary:\n\n{summary}")
-            )
+            today = time.strftime("%Y-%m-%d")
+            summary_sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
+            bcc_emails = os.environ.get("BCC_EMAILS").split(',')
+            send_email(summary_sender_email, summary_sender_email, bcc_emails, f"Schoology Update Summary {today}", post['html_content'] + '\n<br/><br/>\n' + summary)
             downloader.config['updates'][post['post_id']] = post
     downloader._save_config()
 
