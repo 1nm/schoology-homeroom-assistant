@@ -1,3 +1,4 @@
+import datetime
 import json
 import logging
 import os
@@ -244,8 +245,14 @@ class SchoologyAlbumsDownloader:
             post_id = post.get('id', '').replace('edge-assoc-', '')
 
             # Extract date and time
-            datetime = post.find('span', {'class': 'small gray'})
-            datetime = datetime.text if datetime else ''
+            post_datetime = post.find('span', {'class': 'small gray'})
+            post_datetime = post_datetime.text if post_datetime else ''
+            if post_datetime:
+                try:
+                    parsed_datetime = datetime.strptime("%a %b %d, %Y at %I:%M %p")
+                except ValueError:
+                    logging.error(
+                        f"Failed to parse datetime for post {post_id}")
 
             # Extract author's name and profile picture
             author = post.find('a', {'title': 'View user profile.'})
@@ -286,7 +293,7 @@ class SchoologyAlbumsDownloader:
 
             parsed_posts.append({
                 'post_id': post_id,
-                'datetime': datetime,
+                'datetime': parsed_datetime,
                 'author': author_name,
                 'profile_pic_url': profile_pic_url,
                 'content': content.strip(),
@@ -457,7 +464,7 @@ def main():
         if not post['post_id'] in downloader.config['updates']:
             update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}"
             summary = summarize(update_content)
-            post_date_ymd = post['datetime'].strftime("%Y-%m-%d")
+            post_date_ymd = post['datetime'].strftime("%Y-%m-%d") if post['datetime'] else datetime.now().strftime("%Y-%m-%d")
             summary_sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
             bcc_emails_env = os.environ.get("BCC_EMAILS")
             bcc_emails = bcc_emails_env.split(',') if bcc_emails_env else []
