@@ -13,4 +13,4 @@ COPY app /app
 VOLUME /downloads
 WORKDIR /downloads
 
-ENTRYPOINT ["python3", "/app/sadc.py"]
+ENTRYPOINT ["python3", "/app/main.py"]
