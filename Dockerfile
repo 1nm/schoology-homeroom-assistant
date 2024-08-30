@@ -9,6 +9,7 @@ RUN apk update && \
     rm -f /app/requirements.txt
 
 COPY app /app
+RUN chmod +x /app/main.py
 
 VOLUME /downloads
 WORKDIR /downloads

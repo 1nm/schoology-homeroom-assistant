@@ -160,6 +160,7 @@ class SchoologyAlbumsDownloader:
             # Extract main content
             content_span = post.find('span', {'class': 'update-body s-rte'})
             html_content = content_span.prettify() if content_span else ''
+
             content = content_span.get_text() if content_span else ''
 
             # Check if there is a "Show More" link
@@ -186,6 +187,9 @@ class SchoologyAlbumsDownloader:
                         images = [
                             img.get('src', '') for img in additional_content_soup.find_all('img')]
 
+            attachments_div = post.find('div', {'class', 'attachments clearfix'})
+            attachments_html_content = attachments_div.prettify() if attachments_div else ''
+
             parsed_posts.append({
                 'post_id': post_id,
                 'datetime': post_datetime,
@@ -193,6 +197,7 @@ class SchoologyAlbumsDownloader:
                 'profile_pic_url': profile_pic_url,
                 'content': content.strip(),
                 'html_content': html_content,
+                'attachments_html_content': attachments_html_content,
                 'show_more_href': show_more_href,
                 'images': images
             })
@@ -306,12 +311,13 @@ def main():
             update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}"
             summary = summarize(update_content)
             japanese_summary = translate(summary, "Japanese")
+            chinese_summary = translate(summary, "Chinese")
             post_date_ymd = ' '.join(post['datetime'].split(' ')[1:4])
             summary_sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
             bcc_emails_env = os.environ.get("BCC_EMAILS")
             bcc_emails = bcc_emails_env.split(',') if bcc_emails_env else []
             logging.info(f"Sending email to {summary_sender_email} and BCC to {bcc_emails}")
-            markdown_content = f"On {post['datetime']}, {post['author']} posted:" + '\n<br/><br/>\n' + post['html_content'] + '\n<hr/>\n' + summary + '\n<hr/>\n' + japanese_summary
+            markdown_content = f"On {post['datetime']}, {post['author']} posted:" + '\n<br/><br/>\n' + post['html_content'] + post['attachments_html_content'] + '\n<hr/>\n' + summary + '\n<hr/>\n' + japanese_summary + '\n<hr/>\n' + chinese_summary
             send_email(summary_sender_email, summary_sender_email, bcc_emails, f"Schoology Update Summary {post_date_ymd}", markdown_content)
             downloader.config['updates'][post['post_id']] = post
     downloader._save_config()
