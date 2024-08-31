@@ -12,11 +12,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_openai import ChatOpenAI
 
-import pdfplumber
+import fitz  # PyMuPDF
 
 PROMPT_TEMPLATE = """
     Summarize the update from my daughter's homeroom teacher.
-    List all the action items and information for the parents, group them by action items and information.
+    List all the action items and information for the parents, group them by action items and informational items.
     Output in the following example markdown formatting.
 
     The document starts with a title "AI Summary", formatted with a #.
@@ -158,9 +158,9 @@ def send_email(sender_email, receiver_email, bcc_emails, subject, markdown_conte
 
 
 def extract_text_from_pdf(pdf_path):
+    document = fitz.open(pdf_path)
     all_text = ''
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            all_text += page.extract_text() + '\n'  # Extracts text from each page
+    for page in document:
+        all_text += page.get_text() + '\n'  # Extracts text from each page
+    document.close()
     return all_text
-

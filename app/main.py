@@ -60,7 +60,7 @@ class SchoologyAlbumsDownloader:
     def _save_config(self) -> None:
         self._logger.info(f"Saving config file to {self._config_file}")
         with open(self._config_file, 'w') as f:
-            json.dump(self.config, f, indent=2)
+            json.dump(self.config, f, indent=2, ensure_ascii=False)
 
     def _load_config(self) -> None:
         if self._config_file.exists():
@@ -337,17 +337,13 @@ def main():
     posts = downloader.get_updates()
     for post in reversed(posts):
         if not post['post_id'] in downloader.config['updates']:
-            attachments_section = ""
             attachment_file_paths = []
             attachments_text = ""
             if post['attachments']:
-                attachments_section += '\n<br/><br/>\nAttachments:\n<ul>\n'
                 for attachment in post['attachments']:
-                    attachments_section += f'<li><a href="{attachment["url"]}">{attachment["filename"]}</a></li>\n'
                     attachment_file_paths.append(attachment['full_path'])
                     if attachment['text']:
                         attachments_text += '\n' + attachment['text']
-                attachments_section += '</ul>\n'
 
             update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}\n\n{attachments_text}"
             summary = summarize(update_content)
@@ -365,7 +361,6 @@ def main():
                 f"On {post['datetime']}, {post['author']} posted:" 
                 + '\n<br/><br/>\n' 
                 + post['html_content'] 
-                + attachments_section  # Add the attachments section here
                 + '\n<hr/>\n' 
                 + summary 
                 + '\n<hr/>\n' 
@@ -373,7 +368,7 @@ def main():
                 + '\n<hr/>\n' 
                 + chinese_summary
             )
-            send_email(summary_sender_email, summary_sender_email, bcc_emails, f"{HOMEROOM_CLASS} Homeroom Update Summary {post_date_ymd}", markdown_content, attachment_file_paths)
+            send_email(summary_sender_email, summary_sender_email, bcc_emails, f"{HOMEROOM_CLASS} Homeroom Updates", markdown_content, attachment_file_paths)
             downloader.config['updates'][post['post_id']] = post
     downloader._save_config()
 
