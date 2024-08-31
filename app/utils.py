@@ -3,6 +3,8 @@ import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 
 import markdown
 from langchain_core.output_parsers import StrOutputParser
@@ -10,29 +12,31 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_openai import ChatOpenAI
 
+import fitz  # PyMuPDF
+
 PROMPT_TEMPLATE = """
     Summarize the update from my daughter's homeroom teacher.
-    List all the action items and information for the parents, group them by actionable and informational.
+    List all the action items and information for the parents, group them by action items and informational items.
     Output in the following example markdown formatting.
 
     The document starts with a title "AI Summary", formatted with a #.
-    Each update summary is divided into two sections: "Actionable Items" and "Informational Items", each marked with a ##.
-    Under "Actionable Items", there are numbered bullet points (1., 2., etc.), each containing a bolded item name.
+    Each update summary is divided into two sections: "Action Items" and "Information", each marked with a ##.
+    Under "Action Items", there are numbered bullet points (1., 2., etc.), each containing a bolded item name.
     Each bolded item name has lower-level bullet points (-) with specific details or actions.
-    Under "Informational Items", there are also numbered bullet points, each containing a bolded item name.
-    Each bolded item name under "Informational Items" can also have lower-level bullet points with additional details.
+    Under "Information", there are also numbered bullet points, each containing a bolded item name.
+    Each bolded item name under "Information" can also have lower-level bullet points with additional details.
 
     Example:
     ```
     # AI Summary
-    ## Actionable Items
+    ## Action Items
     1. **UOI Animal Book Presentation Sign-Up:**
         - Choose three available slots (June 4, 5, 6 at 8:10-8:25 or 15:30-15:45) and email them to the teacher.
         - If selecting a morning slot, come to school with your child.
     2. **Field Trip to the Zoo:**
         - Prepare for the trip and ensure your child is ready for the outing.
 
-    ## Informational Items
+    ## Information
     1. **Mother's Day:**
         - A secret present is in the children’s backpacks made by them.
     2. **Upcoming Events:**
@@ -95,7 +99,7 @@ def translate(markdown_content, language):
     return response
 
 
-def send_email(sender_email, receiver_email, bcc_emails, subject, markdown_content):
+def send_email(sender_email, receiver_email, bcc_emails, subject, markdown_content, attachment_file_paths):
     """
     Send an email with Markdown content converted to HTML.
 
@@ -131,6 +135,18 @@ def send_email(sender_email, receiver_email, bcc_emails, subject, markdown_conte
     # Combine all recipient emails
     all_recipients = [receiver_email] + bcc_emails
 
+    for file_path in attachment_file_paths:
+        with open(file_path, "rb") as attachment:
+            # Instance of MIMEBase and named as part
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment.read())
+            # Encode file in ASCII characters to send by email    
+            encoders.encode_base64(part)
+            # Add header as key/value pair to attachment part
+            part.add_header('Content-Disposition', f'attachment; filename={os.path.basename(file_path)}')
+            # Attach the instance 'part' to instance 'msg'
+            msg.attach(part)
+
     # Send email through Google's SMTP server
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
@@ -139,3 +155,12 @@ def send_email(sender_email, receiver_email, bcc_emails, subject, markdown_conte
         logging.info("Email sent successfully!")
     except Exception as e:
         logging.info(f"Failed to send email: {e}")
+
+
+def extract_text_from_pdf(pdf_path):
+    document = fitz.open(pdf_path)
+    all_text = ''
+    for page in document:
+        all_text += page.get_text() + '\n'  # Extracts text from each page
+    document.close()
+    return all_text

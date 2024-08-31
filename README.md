@@ -1,6 +1,6 @@
-# Schoology Albums Downloader CLI
+# Get Schoology Updates
 
-Download all photos and videos from Schoology albums
+Get Schoology Course Updates
 
 ## Prerequisites
 
@@ -9,13 +9,13 @@ Download all photos and videos from Schoology albums
 ## Build
 
 ```shell
-docker build -t sadc .
+docker build -t gsu .
 ```
 
 ## Usage
 
 ```shell
-usage: Schoology Albums Downloader CLI [-h] [-e EMAIL] [-p PASSWORD] [-s SUBDOMAIN]
+usage: docker run gsu [-h] [-e EMAIL] [-p PASSWORD] [-s SUBDOMAIN]
 
 optional arguments:
   -h, --help            show this help message and exit

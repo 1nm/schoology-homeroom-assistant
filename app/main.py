@@ -17,7 +17,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from utils import send_email, summarize, translate
+from utils import send_email, summarize, translate, extract_text_from_pdf
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s",
                     level=logging.INFO)
@@ -40,8 +40,10 @@ class SchoologyAlbumsDownloader:
         options = Options()
         options.add_argument("--no-sandbox")
         options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-search-engine-choice-screen')
+        options.add_argument('--disable-gpu')
         if headless:
-            options.add_argument("--headless")
+            options.add_argument("--headless=new")
         self.driver = webdriver.Chrome(options=options)
         headers = {
             "User-Agent":
@@ -58,7 +60,7 @@ class SchoologyAlbumsDownloader:
     def _save_config(self) -> None:
         self._logger.info(f"Saving config file to {self._config_file}")
         with open(self._config_file, 'w') as f:
-            json.dump(self.config, f, indent=2)
+            json.dump(self.config, f, indent=2, ensure_ascii=False)
 
     def _load_config(self) -> None:
         if self._config_file.exists():
@@ -100,7 +102,7 @@ class SchoologyAlbumsDownloader:
         self._logger.info(f"Wait for {seconds} seconds ...")
         time.sleep(seconds)
 
-    def download_media(self, url: str, download_path: Path) -> None:
+    def download_media(self, url: str, download_path: Path=Path().resolve()) -> Path:
         with self.session.get(url, stream=True, allow_redirects=True) as r:
             if 'content-disposition' not in r.headers:
                 fname = ''.join(
@@ -117,109 +119,13 @@ class SchoologyAlbumsDownloader:
 
             if full_path.exists():
                 self._logger.info(f"{full_path} already downloaded, skip ...")
-                return
+                return full_path
 
             with open(full_path, "wb") as f:
                 r.raw.decode_content = True
                 shutil.copyfileobj(r.raw, f)
 
-    def download_album(self, album: tuple[str, str], touch=False) -> None:
-        course_id = self.config['course_id']
-        (album_url, album_title) = album
-        normalized_album_title = album_title.replace('/', '_').replace(':', '')
-        album_download_folder = Path(
-            f"photos/{course_id}/{normalized_album_title}")
-        if album_url in self.config['downloaded']:
-            self._logger.info(f"Album {album_url} already downloaded")
-            return
-        if touch:
-            downloaded_at = time.time()
-            self._logger.info(
-                f"Skip downloading album {normalized_album_title} ...")
-        else:
-            self._logger.info(
-                f"Downloading album {normalized_album_title} from {album_url} ..."
-            )
-            album_download_folder.mkdir(parents=True, exist_ok=True)
-            download_count = 0
-            with self.session.get(f"{self._base_url}{album_url}",
-                                  stream=True,
-                                  allow_redirects=True) as r:
-                r.raw.decode_content = True
-                result = r.raw.data.decode('unicode-escape').replace(
-                    '\\/', '/')
-                matches = re.findall(
-                    r'(media_albums/m/.*?\.(jpg|jpeg|png|gif|mp4))', result)
-                if len(matches) == 0:
-                    self._logger.info(
-                        f"No matches found on the album page. Loading content pages for download URLs ..."
-                    )
-                    content_url_matches = re.findall(
-                        f"({album_url}/content/[0-9]+)", result)
-                    for content_url in content_url_matches:
-                        with self.session.get(f"{self._base_url}{content_url}",
-                                              stream=True,
-                                              allow_redirects=True) as r1:
-                            r1.raw.decode_content = True
-                            content_page_result = r1.raw.data.decode(
-                                'unicode-escape').replace('\\/', '/')
-                            download_url_matches = re.findall(
-                                r'(media_albums/m/.*?\.(jpg|jpeg|png|gif|mp4))',
-                                content_page_result)
-                            download_urls = [
-                                f"{self._base_url}/system/files/{m[0]}"
-                                for m in download_url_matches
-                            ]
-                            for media_url in download_urls:
-                                self.download_media(media_url,
-                                                    album_download_folder)
-                                download_count += 1
-                else:
-                    download_urls = [
-                        f"{self._base_url}/system/files/{m[0]}"
-                        for m in matches
-                    ]
-                    for photo_url in download_urls:
-                        self.download_media(photo_url, album_download_folder)
-                        download_count += 1
-            downloaded_at = time.time()
-            self._logger.info(
-                f"Finished downloading album {normalized_album_title} at {downloaded_at} ..."
-            )
-        if touch or download_count > 0:
-            self.config['downloaded'][album_url] = {
-                'url': album_url,
-                'title': album_title,
-                'downloaded_at': downloaded_at
-            }
-            self._save_config()
-
-    def get_albums(self) -> list[tuple[str, str]]:
-        course_id = self.config['course_id']
-        albums = []
-        page = 0
-        while True:
-            self._logger.info(f"Loading page {page+1} of the album list...")
-            with self.session.get(
-                    f"{self._base_url}/course/{course_id}/materials?list_filter=album&ajax=1&style=full&page={page}",
-                    stream=True,
-                    allow_redirects=True) as r:
-                r.raw.decode_content = True
-                result = r.raw.data.decode('unicode-escape').replace(
-                    '\\/', '/')
-                matches = re.findall(r'<a href="(/album/[0-9]+)">(.+?)</a>',
-                                     result)
-                count = len(matches)
-                if count == 0:
-                    self._logger.info(
-                        f"No match found on page {page+1}, stop loading next page..."
-                    )
-                    break
-                self._logger.info(f"{count} matches found on page {page+1}")
-                for match in matches:
-                    albums.append(match)
-            page += 1
-        return albums
+            return full_path
 
     def get_updates(self):
         course_id = self.config['course_id']
@@ -258,6 +164,7 @@ class SchoologyAlbumsDownloader:
             # Extract main content
             content_span = post.find('span', {'class': 'update-body s-rte'})
             html_content = content_span.prettify() if content_span else ''
+
             content = content_span.get_text() if content_span else ''
 
             # Check if there is a "Show More" link
@@ -284,6 +191,34 @@ class SchoologyAlbumsDownloader:
                         images = [
                             img.get('src', '') for img in additional_content_soup.find_all('img')]
 
+
+            attachments_div = post.find('div', {'class': 'attachments clearfix'})
+            
+            attachments = []
+            
+            # Only proceed if attachments_div is found
+            if attachments_div:
+                attachments_html_content = attachments_div.prettify()
+
+                for a in attachments_div.find_all('a'):
+                    href = a.get('href')  # Get the href attribute (attachment link)
+                    url = self._base_url + href
+        
+                    # Find the first <span> child within the <a> tag
+                    span = a.find('span')
+                    if span:
+                        filename = span.get('aria-label')  # Get the aria-label attribute (attachment filename)
+                        attachments.append({'url': url, 'filename': filename})
+            else:
+                attachments_html_content = ''
+
+            for attachment in attachments:
+                full_path = str(self.download_media(attachment['url']))
+                attachment['full_path'] = full_path
+                if full_path.lower().endswith('pdf'):
+                    text = extract_text_from_pdf(full_path)
+                    attachment['text'] = text
+
             parsed_posts.append({
                 'post_id': post_id,
                 'datetime': post_datetime,
@@ -291,65 +226,13 @@ class SchoologyAlbumsDownloader:
                 'profile_pic_url': profile_pic_url,
                 'content': content.strip(),
                 'html_content': html_content,
+                'attachments_html_content': attachments_html_content,
                 'show_more_href': show_more_href,
-                'images': images
+                'images': images,
+                'attachments': attachments
             })
 
         return parsed_posts
-
-    def onedrive_login(self, email: str, password: str) -> None:
-        onedrive_cookie_file = 'onedrive_cookies.pkl'
-
-        if os.path.exists(onedrive_cookie_file) and os.path.isfile(
-                onedrive_cookie_file):
-            self._load_cookies(onedrive_cookie_file)
-            return
-
-        email_flattened = email.replace("@", "_").replace(".", "_")
-
-        self.driver.get(
-            f"https://{self.subdomain}-my.sharepoint.com/personal/{email_flattened}/_layouts/15/onedrive.aspx"
-        )
-
-        self._wait(5)
-
-        email_input = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located((By.NAME, "loginfmt")))
-
-        next_button = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located((By.ID, "idSIButton9")))
-
-        self._logger.info("Filling in the email")
-
-        email_input.clear()
-        email_input.send_keys(email)
-        next_button.click()
-
-        self._wait(5)
-
-        password_input = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located((By.NAME, "passwd")))
-        submit_button = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located((By.ID, "idSIButton9")))
-
-        self._logger.info("Filling in the password")
-
-        password_input.clear()
-        password_input.send_keys(password)
-        submit_button.click()
-
-        self._wait(5)
-
-        stay_signed_in_button = WebDriverWait(
-            self.driver, self._timeout).until(
-                EC.presence_of_element_located((By.ID, "idSIButton9")))
-
-        self._logger.info(f"Logging in with the email: '{email}'")
-
-        stay_signed_in_button.click()
-
-        self._save_cookies(onedrive_cookie_file)
-        self._save_config()
 
     def schoology_login(self, email: str, password: str) -> None:
         schoology_cookie_file = 'schoology_cookies.pkl'
@@ -447,24 +330,45 @@ def main():
     EMAIL = os.environ.get("SCHOOLOGY_EMAIL")
     PASSWORD = os.environ.get("SCHOOLOGY_PASSWORD")
     SUBDOMAIN = os.environ.get("SCHOOLOGY_SUBDOMAIN")
+    HOMEROOM_CLASS = os.environ.get("HOMEROOM_CLASS")
 
-    downloader = SchoologyAlbumsDownloader(headless=True,
-                                           subdomain=SUBDOMAIN)
-    # downloader.onedrive_login(args.email, args.password)
+    downloader = SchoologyAlbumsDownloader(headless=True, subdomain=SUBDOMAIN)
     downloader.schoology_login(EMAIL, PASSWORD)
     posts = downloader.get_updates()
     for post in reversed(posts):
         if not post['post_id'] in downloader.config['updates']:
-            update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}"
+            attachment_file_paths = []
+            attachments_text = ""
+            if post['attachments']:
+                for attachment in post['attachments']:
+                    attachment_file_paths.append(attachment['full_path'])
+                    if attachment['text']:
+                        attachments_text += '\n' + attachment['text']
+
+            update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}\n\n{attachments_text}"
             summary = summarize(update_content)
             japanese_summary = translate(summary, "Japanese")
+            chinese_summary = translate(summary, "Chinese")
             post_date_ymd = ' '.join(post['datetime'].split(' ')[1:4])
             summary_sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
             bcc_emails_env = os.environ.get("BCC_EMAILS")
             bcc_emails = bcc_emails_env.split(',') if bcc_emails_env else []
             logging.info(f"Sending email to {summary_sender_email} and BCC to {bcc_emails}")
-            markdown_content = f"On {post['datetime']}, {post['author']} posted:" + '\n<br/><br/>\n' + post['html_content'] + '\n<hr/>\n' + summary + '\n<hr/>\n' + japanese_summary
-            send_email(summary_sender_email, summary_sender_email, bcc_emails, f"Schoology Update Summary {post_date_ymd}", markdown_content)
+
+
+# Construct the markdown content with the attachments section
+            markdown_content = (
+                f"On {post['datetime']}, {post['author']} posted:" 
+                + '\n<br/><br/>\n' 
+                + post['html_content'] 
+                + '\n<hr/>\n' 
+                + summary 
+                + '\n<hr/>\n' 
+                + japanese_summary 
+                + '\n<hr/>\n' 
+                + chinese_summary
+            )
+            send_email(summary_sender_email, summary_sender_email, bcc_emails, f"{HOMEROOM_CLASS} Homeroom Updates", markdown_content, attachment_file_paths)
             downloader.config['updates'][post['post_id']] = post
     downloader._save_config()
 

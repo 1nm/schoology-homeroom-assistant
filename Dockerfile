@@ -9,8 +9,9 @@ RUN apk update && \
     rm -f /app/requirements.txt
 
 COPY app /app
+RUN chmod +x /app/main.py
 
 VOLUME /downloads
 WORKDIR /downloads
 
-ENTRYPOINT ["python3", "/app/sadc.py"]
+ENTRYPOINT ["python3", "/app/main.py"]
