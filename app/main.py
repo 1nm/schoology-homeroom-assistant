@@ -17,7 +17,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from utils import send_email, summarize, translate
+from utils import send_email, summarize, translate, extract_text_from_pdf
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s",
                     level=logging.INFO)
@@ -40,8 +40,10 @@ class SchoologyAlbumsDownloader:
         options = Options()
         options.add_argument("--no-sandbox")
         options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-search-engine-choice-screen')
+        options.add_argument('--disable-gpu')
         if headless:
-            options.add_argument("--headless")
+            options.add_argument("--headless=new")
         self.driver = webdriver.Chrome(options=options)
         headers = {
             "User-Agent":
@@ -100,7 +102,7 @@ class SchoologyAlbumsDownloader:
         self._logger.info(f"Wait for {seconds} seconds ...")
         time.sleep(seconds)
 
-    def download_media(self, url: str, download_path: Path) -> None:
+    def download_media(self, url: str, download_path: Path=Path().resolve()) -> Path:
         with self.session.get(url, stream=True, allow_redirects=True) as r:
             if 'content-disposition' not in r.headers:
                 fname = ''.join(
@@ -117,11 +119,13 @@ class SchoologyAlbumsDownloader:
 
             if full_path.exists():
                 self._logger.info(f"{full_path} already downloaded, skip ...")
-                return
+                return full_path
 
             with open(full_path, "wb") as f:
                 r.raw.decode_content = True
                 shutil.copyfileobj(r.raw, f)
+
+            return full_path
 
     def get_updates(self):
         course_id = self.config['course_id']
@@ -187,8 +191,33 @@ class SchoologyAlbumsDownloader:
                         images = [
                             img.get('src', '') for img in additional_content_soup.find_all('img')]
 
-            attachments_div = post.find('div', {'class', 'attachments clearfix'})
-            attachments_html_content = attachments_div.prettify() if attachments_div else ''
+
+            attachments_div = post.find('div', {'class': 'attachments clearfix'})
+            
+            attachments = []
+            
+            # Only proceed if attachments_div is found
+            if attachments_div:
+                attachments_html_content = attachments_div.prettify()
+
+                for a in attachments_div.find_all('a'):
+                    href = a.get('href')  # Get the href attribute (attachment link)
+                    url = self._base_url + href
+        
+                    # Find the first <span> child within the <a> tag
+                    span = a.find('span')
+                    if span:
+                        filename = span.get('aria-label')  # Get the aria-label attribute (attachment filename)
+                        attachments.append({'url': url, 'filename': filename})
+            else:
+                attachments_html_content = ''
+
+            for attachment in attachments:
+                full_path = str(self.download_media(attachment['url']))
+                attachment['full_path'] = full_path
+                if full_path.lower().endswith('pdf'):
+                    text = extract_text_from_pdf(full_path)
+                    attachment['text'] = text
 
             parsed_posts.append({
                 'post_id': post_id,
@@ -199,7 +228,8 @@ class SchoologyAlbumsDownloader:
                 'html_content': html_content,
                 'attachments_html_content': attachments_html_content,
                 'show_more_href': show_more_href,
-                'images': images
+                'images': images,
+                'attachments': attachments
             })
 
         return parsed_posts
@@ -300,15 +330,26 @@ def main():
     EMAIL = os.environ.get("SCHOOLOGY_EMAIL")
     PASSWORD = os.environ.get("SCHOOLOGY_PASSWORD")
     SUBDOMAIN = os.environ.get("SCHOOLOGY_SUBDOMAIN")
+    HOMEROOM_CLASS = os.environ.get("HOMEROOM_CLASS")
 
-    downloader = SchoologyAlbumsDownloader(headless=True,
-                                           subdomain=SUBDOMAIN)
-    # downloader.onedrive_login(args.email, args.password)
+    downloader = SchoologyAlbumsDownloader(headless=True, subdomain=SUBDOMAIN)
     downloader.schoology_login(EMAIL, PASSWORD)
     posts = downloader.get_updates()
     for post in reversed(posts):
         if not post['post_id'] in downloader.config['updates']:
-            update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}"
+            attachments_section = ""
+            attachment_file_paths = []
+            attachments_text = ""
+            if post['attachments']:
+                attachments_section += '\n<br/><br/>\nAttachments:\n<ul>\n'
+                for attachment in post['attachments']:
+                    attachments_section += f'<li><a href="{attachment["url"]}">{attachment["filename"]}</a></li>\n'
+                    attachment_file_paths.append(attachment['full_path'])
+                    if attachment['text']:
+                        attachments_text += '\n' + attachment['text']
+                attachments_section += '</ul>\n'
+
+            update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}\n\n{attachments_text}"
             summary = summarize(update_content)
             japanese_summary = translate(summary, "Japanese")
             chinese_summary = translate(summary, "Chinese")
@@ -317,8 +358,22 @@ def main():
             bcc_emails_env = os.environ.get("BCC_EMAILS")
             bcc_emails = bcc_emails_env.split(',') if bcc_emails_env else []
             logging.info(f"Sending email to {summary_sender_email} and BCC to {bcc_emails}")
-            markdown_content = f"On {post['datetime']}, {post['author']} posted:" + '\n<br/><br/>\n' + post['html_content'] + post['attachments_html_content'] + '\n<hr/>\n' + summary + '\n<hr/>\n' + japanese_summary + '\n<hr/>\n' + chinese_summary
-            send_email(summary_sender_email, summary_sender_email, bcc_emails, f"Schoology Update Summary {post_date_ymd}", markdown_content)
+
+
+# Construct the markdown content with the attachments section
+            markdown_content = (
+                f"On {post['datetime']}, {post['author']} posted:" 
+                + '\n<br/><br/>\n' 
+                + post['html_content'] 
+                + attachments_section  # Add the attachments section here
+                + '\n<hr/>\n' 
+                + summary 
+                + '\n<hr/>\n' 
+                + japanese_summary 
+                + '\n<hr/>\n' 
+                + chinese_summary
+            )
+            send_email(summary_sender_email, summary_sender_email, bcc_emails, f"{HOMEROOM_CLASS} Homeroom Update Summary {post_date_ymd}", markdown_content, attachment_file_paths)
             downloader.config['updates'][post['post_id']] = post
     downloader._save_config()
 
