@@ -53,6 +53,8 @@ PROMPT_TEMPLATE = """
 
 TRANSLATION_PROMPT_TEMPLATE = """
     Translate the following content into {language}, keep the original markdown formatting.
+    For English to Japanese, translate "AI Summary" to "AI 要約", "Action Items" to "アクションアイテム", "Information" to "情報".
+    For English to Chinese, translate "AI Summary" to "AI 总结", "Action Items" to "行动项目", "Information" to "信息".
     
     ```
     {content}

@@ -8,6 +8,7 @@ import shutil
 import time
 from datetime import datetime
 from pathlib import Path
+from string import ascii_lowercase, digits
 
 import requests
 from bs4 import BeautifulSoup
@@ -105,9 +106,7 @@ class SchoologyAlbumsDownloader:
     def download_media(self, url: str, download_path: Path=Path().resolve()) -> Path:
         with self.session.get(url, stream=True, allow_redirects=True) as r:
             if 'content-disposition' not in r.headers:
-                fname = ''.join(
-                    random.choices(string.ascii_lowercase + string.digits,
-                                   k=16))
+                fname = ''.join(random.choices(ascii_lowercase + digits, k=16))
             else:
                 d = r.headers['content-disposition']
                 fname = re.findall('filename="(.+)"', d)[0]
@@ -138,6 +137,10 @@ class SchoologyAlbumsDownloader:
                 '\\/', '/')
             posts = self.parse_posts(result)
             return posts
+
+    
+    def _get_file_size_in_mb(self, file_path):
+        return os.path.getsize(file_path) / (1024 * 1024)  # Convert bytes to MB
 
     def parse_posts(self, html):
         soup = BeautifulSoup(html, 'html.parser')
@@ -215,7 +218,7 @@ class SchoologyAlbumsDownloader:
             for attachment in attachments:
                 full_path = str(self.download_media(attachment['url']))
                 attachment['full_path'] = full_path
-                if full_path.lower().endswith('pdf'):
+                if full_path.lower().endswith('pdf') and self._get_file_size_in_mb(full_path) < 10:
                     text = extract_text_from_pdf(full_path)
                     attachment['text'] = text
 
@@ -325,12 +328,27 @@ class SchoologyAlbumsDownloader:
         self.driver.close()
 
 
+def convert_to_date(date_str):
+    # Get the current date for "Today at" case
+    today = datetime.now().strftime("%b %d, %Y")
+    
+    # Handle "Today at" format
+    if "Today at" in date_str:
+        date_str = date_str.replace("Today", today)
+        return datetime.strptime(date_str, "%b %d, %Y at %I:%M %p")
+    
+    # Handle general "Day Mon DD, YYYY at hh:mm AM/PM" format
+    try:
+        return datetime.strptime(date_str, "%a %b %d, %Y at %I:%M %p")
+    except ValueError:
+        raise ValueError("The provided date string is in an unrecognized format.")
 
 def main():
     EMAIL = os.environ.get("SCHOOLOGY_EMAIL")
     PASSWORD = os.environ.get("SCHOOLOGY_PASSWORD")
     SUBDOMAIN = os.environ.get("SCHOOLOGY_SUBDOMAIN")
     HOMEROOM_CLASS = os.environ.get("HOMEROOM_CLASS")
+    HOMEROOM_COURSE_URL = os.environ.get("HOMEROOM_COURSE_URL")
 
     downloader = SchoologyAlbumsDownloader(headless=True, subdomain=SUBDOMAIN)
     downloader.schoology_login(EMAIL, PASSWORD)
@@ -341,24 +359,28 @@ def main():
             attachments_text = ""
             if post['attachments']:
                 for attachment in post['attachments']:
-                    attachment_file_paths.append(attachment['full_path'])
-                    if attachment['text']:
+                    if 'text' in attachment and attachment['text']:
                         attachments_text += '\n' + attachment['text']
+                        attachment_file_paths.append(attachment['full_path'])
 
-            update_content = f"On {post['datetime']}, {post['author']} posted:\n\n{post['content']}\n\n{attachments_text}"
+            dt = convert_to_date(post['datetime'])
+            post_datetime = dt.strftime("%b %d, %Y at %I:%M %p")
+            update_content = f"On {post_datetime}, {post['author']} posted:\n\n{post['content']}\n\n{attachments_text}"
             summary = summarize(update_content)
             japanese_summary = translate(summary, "Japanese")
             chinese_summary = translate(summary, "Chinese")
-            post_date_ymd = ' '.join(post['datetime'].split(' ')[1:4])
+            post_date_ymd = dt.strftime("%Y%m%d")
             summary_sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
+            summary_receiver_email = os.environ.get("SUMMARY_RECEIVER_EMAIL")
             bcc_emails_env = os.environ.get("BCC_EMAILS")
             bcc_emails = bcc_emails_env.split(',') if bcc_emails_env else []
-            logging.info(f"Sending email to {summary_sender_email} and BCC to {bcc_emails}")
+            logging.info(f"Sending email from {summary_sender_email} to {summary_receiver_email} and BCC to {bcc_emails}")
 
 
 # Construct the markdown content with the attachments section
             markdown_content = (
-                f"On {post['datetime']}, {post['author']} posted:" 
+                f"<a href={HOMEROOM_COURSE_URL}>View updates on schoology</a>\n<br/><br/>\n"
+                + f"On {post['datetime']}, {post['author']} posted:"
                 + '\n<br/><br/>\n' 
                 + post['html_content'] 
                 + '\n<hr/>\n' 
@@ -368,7 +390,7 @@ def main():
                 + '\n<hr/>\n' 
                 + chinese_summary
             )
-            send_email(summary_sender_email, summary_sender_email, bcc_emails, f"{HOMEROOM_CLASS} Homeroom Updates", markdown_content, attachment_file_paths)
+            send_email(summary_sender_email, summary_receiver_email, bcc_emails, f"{HOMEROOM_CLASS} Homeroom Updates {post_date_ymd}", markdown_content, attachment_file_paths)
             downloader.config['updates'][post['post_id']] = post
     downloader._save_config()
 
