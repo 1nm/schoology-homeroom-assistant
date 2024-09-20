@@ -218,7 +218,7 @@ class SchoologyAlbumsDownloader:
             for attachment in attachments:
                 full_path = str(self.download_media(attachment['url']))
                 attachment['full_path'] = full_path
-                if full_path.lower().endswith('pdf') and self._get_file_size_in_mb(full_path) < 10:
+                if full_path.lower().endswith('pdf') and self._get_file_size_in_mb(full_path) <= 20:  # Only process files less than 20MB
                     text = extract_text_from_pdf(full_path)
                     attachment['text'] = text
 
