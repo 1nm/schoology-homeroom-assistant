@@ -16,15 +16,16 @@ import fitz  # PyMuPDF
 
 PROMPT_TEMPLATE = """
     Summarize the update from my daughter's homeroom teacher.
-    List all the action items and information for the parents, group them by action items and informational items.
-    Output in the following example markdown formatting.
 
-    The document starts with a title "AI Summary", formatted with a #.
-    Each update summary is divided into two sections: "Action Items" and "Information", each marked with a ##.
-    Under "Action Items", there are numbered bullet points (1., 2., etc.), each containing a bolded item name.
-    Each bolded item name has lower-level bullet points (-) with specific details or actions.
-    Under "Information", there are also numbered bullet points, each containing a bolded item name.
-    Each bolded item name under "Information" can also have lower-level bullet points with additional details.
+    List all the action items and information for the parents, grouping them into 'Action Items' and 'Information'.
+
+    Output in the following markdown formatting:
+
+    - The document starts with a title "AI Summary", formatted with a single '#'.
+    - The content is divided into two sections: "Action Items" and "Information", each marked with '##'.
+    - Under each section, list the items as numbered bullet points (1., 2., etc.). Each item should have a bolded item name followed by a colon.
+    - For each item, include any specific details or actions as sub-points, using unnumbered bullet points starting with a hyphen (-). **Do not number the sub-points.**
+    - Ensure that only the main items are numbered, and sub-points are indented and use hyphens without numbers.
 
     Example:
     ```
@@ -53,8 +54,8 @@ PROMPT_TEMPLATE = """
 
 TRANSLATION_PROMPT_TEMPLATE = """
     Translate the following content into {language}, keep the original markdown formatting.
-    For English to Japanese, translate "AI Summary" to "AI 要約", "Action Items" to "アクションアイテム", "Information" to "情報".
-    For English to Chinese, translate "AI Summary" to "AI 总结", "Action Items" to "行动项目", "Information" to "信息".
+    For English to Japanese, translate "AI Summary" to "AI 概要", "Action Items" to "アクションアイテム", "Information" to "情報", "fact families" to "ファクトファミリー"
+    For English to Chinese, translate "AI Summary" to "AI 总结", "Action Items" to "行动项目", "Information" to "信息", "fact families" to "fact families".
     
     ```
     {content}
@@ -123,6 +124,9 @@ def send_email(sender_email, receiver_email, bcc_emails, subject, markdown_conte
 
     # Convert Markdown to HTML
     html_content = markdown.markdown(markdown_content)
+
+    logging.info(markdown_content)
+    # logging.info(html_content)
 
     # Create the email message
     msg = MIMEMultipart()
