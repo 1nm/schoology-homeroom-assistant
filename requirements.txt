@@ -5,5 +5,5 @@ python-dotenv
 line-bot-sdk
 langchain~=0.1.0
 langchain-openai
-markdown
+markdown2
 pymupdf

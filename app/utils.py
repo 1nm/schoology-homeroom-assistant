@@ -6,7 +6,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-import markdown
+import markdown2
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -102,7 +102,13 @@ def translate(markdown_content, language):
     return response
 
 
-def send_email(sender_email, receiver_email, bcc_emails, subject, markdown_content, attachment_file_paths):
+def markdown_to_html(markdown_content):
+    html_content = markdown2.markdown(markdown_content)
+    logging.info(markdown_content)
+    logging.info(html_content)
+    return html_content
+
+def send_email(sender_email, receiver_email, bcc_emails, subject, html_content, attachment_file_paths):
     """
     Send an email with Markdown content converted to HTML.
 
@@ -121,12 +127,6 @@ def send_email(sender_email, receiver_email, bcc_emails, subject, markdown_conte
     app_password = os.getenv('GOOGLE_APP_PASSWORD')
     if not app_password:
         raise ValueError("App password not found in environment variables.")
-
-    # Convert Markdown to HTML
-    html_content = markdown.markdown(markdown_content)
-
-    logging.info(markdown_content)
-    # logging.info(html_content)
 
     # Create the email message
     msg = MIMEMultipart()

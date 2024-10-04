@@ -18,7 +18,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from utils import send_email, summarize, translate, extract_text_from_pdf
+from utils import send_email, summarize, translate, extract_text_from_pdf, markdown_to_html
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s",
                     level=logging.INFO)
@@ -215,8 +215,11 @@ class SchoologyAlbumsDownloader:
             else:
                 attachments_html_content = ''
 
+            cwd = Path().resolve()
+            attachment_download_path = cwd / 'attachments'
+
             for attachment in attachments:
-                full_path = str(self.download_media(attachment['url']))
+                full_path = str(self.download_media(url=attachment['url'], download_path=attachment_download_path))
                 attachment['full_path'] = full_path
                 if full_path.lower().endswith('pdf') and self._get_file_size_in_mb(full_path) <= 20:  # Only process files less than 20MB
                     text = extract_text_from_pdf(full_path)
@@ -366,9 +369,15 @@ def main():
             dt = convert_to_date(post['datetime'])
             post_datetime = dt.strftime("%b %d, %Y at %I:%M %p")
             update_content = f"On {post_datetime}, {post['author']} posted:\n\n{post['content']}\n\n{attachments_text}"
+
             summary = summarize(update_content)
             japanese_summary = translate(summary, "Japanese")
             chinese_summary = translate(summary, "Chinese")
+
+            summary_html = markdown_to_html(summary)
+            japanese_summary_html = markdown_to_html(japanese_summary)
+            chinese_summary_html = markdown_to_html(chinese_summary)
+
             post_date_ymd = dt.strftime("%Y%m%d")
             summary_sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
             summary_receiver_email = os.environ.get("SUMMARY_RECEIVER_EMAIL")
@@ -377,20 +386,20 @@ def main():
             logging.info(f"Sending email from {summary_sender_email} to {summary_receiver_email} and BCC to {bcc_emails}")
 
 
-# Construct the markdown content with the attachments section
-            markdown_content = (
+            # Construct the html content with the attachments section
+            html_content = (
                 f"<a href={HOMEROOM_COURSE_URL}>View updates on schoology</a>\n<br/><br/>\n"
                 + f"On {post['datetime']}, {post['author']} posted:"
                 + '\n<br/><br/>\n' 
                 + post['html_content'] 
                 + '\n<hr/>\n' 
-                + summary 
+                + summary_html
                 + '\n<hr/>\n' 
-                + japanese_summary 
+                + japanese_summary_html
                 + '\n<hr/>\n' 
-                + chinese_summary
+                + chinese_summary_html
             )
-            send_email(summary_sender_email, summary_receiver_email, bcc_emails, f"{HOMEROOM_CLASS} Homeroom Updates {post_date_ymd}", markdown_content, attachment_file_paths)
+            send_email(summary_sender_email, summary_receiver_email, bcc_emails, f"{HOMEROOM_CLASS} Homeroom Updates {post_date_ymd}", html_content, attachment_file_paths)
             downloader.config['updates'][post['post_id']] = post
     downloader._save_config()
 
