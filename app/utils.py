@@ -26,6 +26,7 @@ PROMPT_TEMPLATE = """
     - Under each section, list the items as numbered bullet points (1., 2., etc.). Each item should have a bolded item name followed by a colon.
     - For each item, include any specific details or actions as sub-points, using unnumbered bullet points starting with a hyphen (-). **Do not number the sub-points.**
     - Ensure that only the main items are numbered, and sub-points are indented and use hyphens without numbers.
+    - Ensure that there is no strikethrough formatting in the markdown.
 
     Example:
     ```
@@ -39,7 +40,7 @@ PROMPT_TEMPLATE = """
 
     ## Information
     1. **Mother's Day:**
-        - A secret present is in the children’s backpacks made by them.
+        - A secret present is in the children's backpacks made by them.
     2. **Upcoming Events:**
         - May 17 and 24: Riverside Park visits
     ```
