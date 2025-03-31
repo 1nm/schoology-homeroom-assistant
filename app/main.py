@@ -389,7 +389,7 @@ def main():
             # Construct the html content with the attachments section
             html_content = (
                 f"<a href={HOMEROOM_COURSE_URL}>View updates on schoology</a>\n<br/><br/>\n"
-                + f"On {post['datetime']}, {post['author']} posted:"
+                + f"On {post_datetime}, {post['author']} posted:"
                 + '\n<br/><br/>\n' 
                 + post['html_content'] 
                 + '\n<hr/>\n' 
