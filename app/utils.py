@@ -27,6 +27,7 @@ PROMPT_TEMPLATE = """
     - For each item, include any specific details or actions as sub-points, using unnumbered bullet points starting with a hyphen (-). **Do not number the sub-points.**
     - Ensure that only the main items are numbered, and sub-points are indented and use hyphens without numbers.
     - Ensure that there is no strikethrough formatting in the markdown.
+    - Replace any HTML-like tags such as <sh>, <ch>, <s>, and <x> with double quotation marks "sh", "ch", "s" and "x".
 
     Example:
     ```
