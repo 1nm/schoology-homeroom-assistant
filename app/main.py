@@ -387,7 +387,7 @@ def main():
     HOMEROOM_CLASS = os.environ.get("HOMEROOM_CLASS")
     HOMEROOM_COURSE_URL = os.environ.get("HOMEROOM_COURSE_URL")
 
-    downloader = SchoologyAlbumsDownloader(headless=False, subdomain=SUBDOMAIN)
+    downloader = SchoologyAlbumsDownloader(headless=True, subdomain=SUBDOMAIN)
     downloader.schoology_login(EMAIL, PASSWORD)
     posts = downloader.get_updates()
     for post in reversed(posts):
