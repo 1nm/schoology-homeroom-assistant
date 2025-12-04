@@ -37,7 +37,7 @@ load_dotenv(find_dotenv(usecwd=True))
 
 class SchoologyAlbumsDownloader:
     def __init__(
-        self, timeout: int = 300, headless: bool = True, subdomain: str = ""
+        self, timeout: int = 30, headless: bool = True, subdomain: str = ""
     ) -> None:
         self._timeout = timeout
         self._base_url = f"https://{subdomain}.schoology.com"
@@ -48,6 +48,7 @@ class SchoologyAlbumsDownloader:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-search-engine-choice-screen")
         options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920,1080")
         if headless:
             options.add_argument("--headless=new")
         self.driver = webdriver.Chrome(options=options)
@@ -269,11 +270,13 @@ class SchoologyAlbumsDownloader:
 
         self._wait(5)
 
+        self._logger.info("Waiting for email input field...")
         email_input = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located((By.NAME, "loginfmt"))
         )
         self._logger.info("Email input field found.")
 
+        self._logger.info("Waiting for Next button...")
         next_button = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located((By.ID, "idSIButton9"))
         )
@@ -287,11 +290,13 @@ class SchoologyAlbumsDownloader:
 
         self._wait(5)
 
+        self._logger.info("Waiting for password input field...")
         password_input = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located((By.NAME, "passwd"))
         )
         self._logger.info("Password input field found.")
 
+        self._logger.info("Waiting for Submit button...")
         submit_button = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located((By.ID, "idSIButton9"))
         )
@@ -305,6 +310,7 @@ class SchoologyAlbumsDownloader:
 
         self._wait(5)
 
+        self._logger.info("Waiting for Stay signed in button...")
         stay_signed_in_button = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located((By.ID, "idSIButton9"))
         )
@@ -317,6 +323,7 @@ class SchoologyAlbumsDownloader:
         self._wait(5)
 
         # Find the button and switch to student account
+        self._logger.info("Waiting for 'Parents of' drop down menu...")
         drop_down_menu = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located(
                 (By.XPATH, '//div[contains(text(), "Parents of")]')
@@ -331,6 +338,7 @@ class SchoologyAlbumsDownloader:
         self._wait(5)
 
         # Find the button and switch to student account
+        self._logger.info("Waiting for switch child link...")
         switch_child_link = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located(
                 (By.XPATH, '//a[contains(@href,"/parent/switch_child/")]')
@@ -344,6 +352,7 @@ class SchoologyAlbumsDownloader:
 
         self._logger.info("Opening homeroom course ...")
         # Find homeroom link
+        self._logger.info("Waiting for Homeroom link...")
         homeroom_link = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located(
                 (By.XPATH, '//a[contains(text(),"Homeroom")]')
@@ -382,6 +391,7 @@ def convert_to_date(date_str):
 
 
 def main():
+    downloader = None
     try:
         EMAIL = os.environ.get("SCHOOLOGY_EMAIL", "")
         PASSWORD = os.environ.get("SCHOOLOGY_PASSWORD", "")
@@ -450,7 +460,18 @@ def main():
         import traceback
         error_message = traceback.format_exc()
         logging.error(f"Script failed: {error_message}")
-        notify_error(error_message)
+        
+        error_attachments = []
+        if downloader and downloader.driver:
+            try:
+                screenshot_path = "error_screenshot.png"
+                downloader.driver.save_screenshot(screenshot_path)
+                error_attachments.append(screenshot_path)
+                logging.info(f"Screenshot saved to {screenshot_path}")
+            except Exception as screenshot_error:
+                logging.error(f"Failed to take screenshot: {screenshot_error}")
+
+        notify_error(error_message, error_attachments)
 
 
 if __name__ == "__main__":

@@ -174,21 +174,30 @@ def extract_text_from_pdf(pdf_path):
     return all_text
 
 
-def notify_error(error_message):
+def notify_error(error_message, attachment_file_paths=None):
+    if attachment_file_paths is None:
+        attachment_file_paths = []
+
     sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
+    receiver_email = os.environ.get("SUMMARY_RECEIVER_EMAIL")
+
     if not sender_email:
         logging.error("SUMMARY_SENDER_EMAIL not set, cannot send error email.")
         return
 
+    if not receiver_email:
+        logging.warning("SUMMARY_RECEIVER_EMAIL not set, sending error email to sender.")
+        receiver_email = sender_email
+
     subject = "Schoology Script Failed"
     html_content = f"<h3>The script failed with the following error:</h3><pre>{error_message}</pre>"
 
-    logging.info(f"Sending error email to {sender_email}")
+    logging.info(f"Sending error email from {sender_email} to {receiver_email}")
     send_email(
         sender_email,
-        sender_email,
+        receiver_email,
         [],
         subject,
         html_content,
-        [],
+        attachment_file_paths,
     )
