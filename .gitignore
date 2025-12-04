@@ -595,3 +595,5 @@ gradle-app.setting
 *.pkl
 *.conf
 .env
+
+attachments

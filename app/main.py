@@ -36,7 +36,7 @@ load_dotenv(find_dotenv(usecwd=True))
 
 class SchoologyAlbumsDownloader:
     def __init__(
-        self, timeout: int = 30, headless: bool = True, subdomain: str = ""
+        self, timeout: int = 300, headless: bool = True, subdomain: str = ""
     ) -> None:
         self._timeout = timeout
         self._base_url = f"https://{subdomain}.schoology.com"
@@ -220,6 +220,7 @@ class SchoologyAlbumsDownloader:
 
             cwd = Path().resolve()
             attachment_download_path = cwd / "attachments"
+            attachment_download_path.mkdir(exist_ok=True)
 
             for attachment in attachments:
                 full_path = str(
@@ -270,10 +271,12 @@ class SchoologyAlbumsDownloader:
         email_input = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located((By.NAME, "loginfmt"))
         )
+        self._logger.info("Email input field found.")
 
         next_button = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located((By.ID, "idSIButton9"))
         )
+        self._logger.info("Next button found.")
 
         self._logger.info("Filling in the email")
 
@@ -286,9 +289,12 @@ class SchoologyAlbumsDownloader:
         password_input = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located((By.NAME, "passwd"))
         )
+        self._logger.info("Password input field found.")
+
         submit_button = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located((By.ID, "idSIButton9"))
         )
+        self._logger.info("Submit button found.")
 
         self._logger.info("Filling in the password")
 
@@ -301,6 +307,7 @@ class SchoologyAlbumsDownloader:
         stay_signed_in_button = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located((By.ID, "idSIButton9"))
         )
+        self._logger.info("Stay signed in button found.")
 
         self._logger.info(f"Logging in with the email: '{email}'")
 
@@ -311,9 +318,10 @@ class SchoologyAlbumsDownloader:
         # Find the button and switch to student account
         drop_down_menu = WebDriverWait(self.driver, self._timeout).until(
             EC.presence_of_element_located(
-                (By.XPATH, '//img[contains(@alt,"Parents of")]')
+                (By.XPATH, '//div[contains(text(), "Parents of")]')
             )
         )
+        self._logger.info("Drop down menu found.")
 
         self._logger.info("Swiching to children account ...")
 
@@ -327,6 +335,7 @@ class SchoologyAlbumsDownloader:
                 (By.XPATH, '//a[contains(@href,"/parent/switch_child/")]')
             )
         )
+        self._logger.info("Switch child link found.")
 
         switch_child_link.click()
 
@@ -339,6 +348,7 @@ class SchoologyAlbumsDownloader:
                 (By.XPATH, '//a[contains(text(),"Homeroom")]')
             )
         )
+        self._logger.info("Homeroom link found.")
 
         homeroom_link.click()
 
@@ -377,7 +387,7 @@ def main():
     HOMEROOM_CLASS = os.environ.get("HOMEROOM_CLASS")
     HOMEROOM_COURSE_URL = os.environ.get("HOMEROOM_COURSE_URL")
 
-    downloader = SchoologyAlbumsDownloader(headless=True, subdomain=SUBDOMAIN)
+    downloader = SchoologyAlbumsDownloader(headless=False, subdomain=SUBDOMAIN)
     downloader.schoology_login(EMAIL, PASSWORD)
     posts = downloader.get_updates()
     for post in reversed(posts):

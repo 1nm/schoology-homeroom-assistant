@@ -69,7 +69,7 @@ TRANSLATION_PROMPT_TEMPLATE = """
 def summarize(text):
     prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
     output_parser = StrOutputParser()
-    model = ChatOpenAI(model="gpt-4o")
+    model = ChatOpenAI(model="gpt-4.1")
     chain = (
         prompt
         | model
