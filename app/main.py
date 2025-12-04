@@ -24,6 +24,7 @@ from utils import (
     translate,
     extract_text_from_pdf,
     markdown_to_html,
+    notify_error,
 )
 
 logging.basicConfig(
@@ -381,69 +382,75 @@ def convert_to_date(date_str):
 
 
 def main():
-    EMAIL = os.environ.get("SCHOOLOGY_EMAIL", "")
-    PASSWORD = os.environ.get("SCHOOLOGY_PASSWORD", "")
-    SUBDOMAIN = os.environ.get("SCHOOLOGY_SUBDOMAIN", "")
-    HOMEROOM_CLASS = os.environ.get("HOMEROOM_CLASS")
-    HOMEROOM_COURSE_URL = os.environ.get("HOMEROOM_COURSE_URL")
+    try:
+        EMAIL = os.environ.get("SCHOOLOGY_EMAIL", "")
+        PASSWORD = os.environ.get("SCHOOLOGY_PASSWORD", "")
+        SUBDOMAIN = os.environ.get("SCHOOLOGY_SUBDOMAIN", "")
+        HOMEROOM_CLASS = os.environ.get("HOMEROOM_CLASS")
+        HOMEROOM_COURSE_URL = os.environ.get("HOMEROOM_COURSE_URL")
+        SUMMARY_SENDER_EMAIL = os.environ.get("SUMMARY_SENDER_EMAIL")
+        SUMMARY_RECEIVER_EMAIL = os.environ.get("SUMMARY_RECEIVER_EMAIL")
+        BCC_EMAILS_ENV = os.environ.get("BCC_EMAILS")
+        BCC_EMAILS = BCC_EMAILS_ENV.split(",") if BCC_EMAILS_ENV else []
 
-    downloader = SchoologyAlbumsDownloader(headless=True, subdomain=SUBDOMAIN)
-    downloader.schoology_login(EMAIL, PASSWORD)
-    posts = downloader.get_updates()
-    for post in reversed(posts):
-        if post["post_id"] not in downloader.config["updates"]:
-            attachment_file_paths = []
-            attachments_text = ""
-            if post["attachments"]:
-                for attachment in post["attachments"]:
-                    if "text" in attachment and attachment["text"]:
-                        attachments_text += "\n" + attachment["text"]
-                        attachment_file_paths.append(attachment["full_path"])
+        downloader = SchoologyAlbumsDownloader(headless=True, subdomain=SUBDOMAIN)
+        downloader.schoology_login(EMAIL, PASSWORD)
+        posts = downloader.get_updates()
+        for post in reversed(posts):
+            if post["post_id"] not in downloader.config["updates"]:
+                attachment_file_paths = []
+                attachments_text = ""
+                if post["attachments"]:
+                    for attachment in post["attachments"]:
+                        if "text" in attachment and attachment["text"]:
+                            attachments_text += "\n" + attachment["text"]
+                            attachment_file_paths.append(attachment["full_path"])
 
-            dt = convert_to_date(post["datetime"])
-            post_datetime = dt.strftime("%b %d, %Y at %I:%M %p")
-            update_content = f"On {post_datetime}, {post['author']} posted:\n\n{post['content']}\n\n{attachments_text}"
+                dt = convert_to_date(post["datetime"])
+                post_datetime = dt.strftime("%b %d, %Y at %I:%M %p")
+                update_content = f"On {post_datetime}, {post['author']} posted:\n\n{post['content']}\n\n{attachments_text}"
 
-            summary = summarize(update_content)
-            japanese_summary = translate(summary, "Japanese")
-            chinese_summary = translate(summary, "Chinese")
+                summary = summarize(update_content)
+                japanese_summary = translate(summary, "Japanese")
+                chinese_summary = translate(summary, "Chinese")
 
-            summary_html = markdown_to_html(summary)
-            japanese_summary_html = markdown_to_html(japanese_summary)
-            chinese_summary_html = markdown_to_html(chinese_summary)
+                summary_html = markdown_to_html(summary)
+                japanese_summary_html = markdown_to_html(japanese_summary)
+                chinese_summary_html = markdown_to_html(chinese_summary)
 
-            post_date_ymd = dt.strftime("%Y%m%d")
-            summary_sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
-            summary_receiver_email = os.environ.get("SUMMARY_RECEIVER_EMAIL")
-            bcc_emails_env = os.environ.get("BCC_EMAILS")
-            bcc_emails = bcc_emails_env.split(",") if bcc_emails_env else []
-            logging.info(
-                f"Sending email from {summary_sender_email} to {summary_receiver_email} and BCC to {bcc_emails}"
-            )
+                post_date_ymd = dt.strftime("%Y%m%d")
+                logging.info(
+                    f"Sending email from {SUMMARY_SENDER_EMAIL} to {SUMMARY_RECEIVER_EMAIL} and BCC to {BCC_EMAILS}"
+                )
 
-            # Construct the html content with the attachments section
-            html_content = (
-                f"<a href={HOMEROOM_COURSE_URL}>View updates on schoology</a>\n<br/><br/>\n"
-                + f"On {post_datetime}, {post['author']} posted:"
-                + "\n<br/><br/>\n"
-                + post["html_content"]
-                + "\n<hr/>\n"
-                + summary_html
-                + "\n<hr/>\n"
-                + japanese_summary_html
-                + "\n<hr/>\n"
-                + chinese_summary_html
-            )
-            send_email(
-                summary_sender_email,
-                summary_receiver_email,
-                bcc_emails,
-                f"{HOMEROOM_CLASS} Homeroom Updates {post_date_ymd}",
-                html_content,
-                attachment_file_paths,
-            )
-            downloader.config["updates"][post["post_id"]] = post
-    downloader._save_config()
+                # Construct the html content with the attachments section
+                html_content = (
+                    f"<a href={HOMEROOM_COURSE_URL}>View updates on schoology</a>\n<br/><br/>\n"
+                    + f"On {post_datetime}, {post['author']} posted:"
+                    + "\n<br/><br/>\n"
+                    + post["html_content"]
+                    + "\n<hr/>\n"
+                    + summary_html
+                    + "\n<hr/>\n"
+                    + japanese_summary_html
+                    + "\n<hr/>\n"
+                    + chinese_summary_html
+                )
+                send_email(
+                    SUMMARY_SENDER_EMAIL,
+                    SUMMARY_RECEIVER_EMAIL,
+                    BCC_EMAILS,
+                    f"{HOMEROOM_CLASS} Homeroom Updates {post_date_ymd}",
+                    html_content,
+                    attachment_file_paths,
+                )
+                downloader.config["updates"][post["post_id"]] = post
+        downloader._save_config()
+    except Exception as e:
+        import traceback
+        error_message = traceback.format_exc()
+        logging.error(f"Script failed: {error_message}")
+        notify_error(error_message)
 
 
 if __name__ == "__main__":

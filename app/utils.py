@@ -172,3 +172,23 @@ def extract_text_from_pdf(pdf_path):
         all_text += page.get_text() + '\n'  # Extracts text from each page
     document.close()
     return all_text
+
+
+def notify_error(error_message):
+    sender_email = os.environ.get("SUMMARY_SENDER_EMAIL")
+    if not sender_email:
+        logging.error("SUMMARY_SENDER_EMAIL not set, cannot send error email.")
+        return
+
+    subject = "Schoology Script Failed"
+    html_content = f"<h3>The script failed with the following error:</h3><pre>{error_message}</pre>"
+
+    logging.info(f"Sending error email to {sender_email}")
+    send_email(
+        sender_email,
+        sender_email,
+        [],
+        subject,
+        html_content,
+        [],
+    )
