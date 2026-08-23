@@ -1,5 +1,8 @@
 FROM python:3.11-alpine
 
+# Unbuffered so logs reach cron/journald as the run progresses, not at exit.
+ENV PYTHONUNBUFFERED=1
+
 COPY requirements.txt /app/requirements.txt
 
 RUN apk update && \

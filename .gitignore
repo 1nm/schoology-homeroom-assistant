@@ -597,3 +597,8 @@ gradle-app.setting
 .env
 
 attachments
+
+# Runtime state written next to the data volume
+.schoology_cookies.json
+.error_notify.json
+.venv/

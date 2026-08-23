@@ -1,2 +1,6 @@
 photos
 *.pkl
+.venv
+.git
+tests
+attachments

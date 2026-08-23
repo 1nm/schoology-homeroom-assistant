@@ -1,478 +1,196 @@
-import json
+#!/usr/bin/env python3
+"""Mail a translated AI summary of every new Schoology homeroom post.
+
+One run: restore (or create) a session, read the course feed, and for each post
+that has not been mailed before, summarise it, translate it, send it, and record
+that it went out -- in that order, one post at a time, so an interrupted run
+never re-sends and never silently drops a post.
+"""
+
+from __future__ import annotations
+
+import argparse
 import logging
-import os
-import pickle
-import random
-import re
-import shutil
-import time
-from datetime import datetime
+import sys
+import traceback
 from pathlib import Path
-from string import ascii_lowercase, digits
 
-import requests
-from bs4 import BeautifulSoup
-from dotenv import find_dotenv, load_dotenv
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
-from utils import (
-    send_email,
-    summarize,
-    translate,
-    extract_text_from_pdf,
-    markdown_to_html,
-    notify_error,
-)
+from auth import SchoologyAuth
+from config import ConfigError, Settings
+from mailer import notify_error, send_email
+from schoology import Post, SchoologyClient
+from state import State
+from summarize import markdown_to_html, summarize, translate
 
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s: %(message)s", level=logging.INFO
-)
+logger = logging.getLogger("schoology")
 
 
-load_dotenv(find_dotenv(usecwd=True))
+def collect_attachments(post: Post, budget_mb: float) -> tuple[list[Path], str]:
+    """Files to attach to the mail, and the text pulled out of them for the summary."""
+    paths: list[Path] = []
+    texts: list[str] = []
+    remaining = budget_mb * 1024 * 1024
+
+    for attachment in post.attachments:
+        if attachment.text:
+            texts.append(attachment.text)
+        if attachment.path is None:
+            continue
+        size = attachment.path.stat().st_size
+        if size > remaining:
+            logger.info("Not attaching %s, the mail's size budget is used up", attachment.path)
+            continue
+        remaining -= size
+        paths.append(attachment.path)
+
+    return paths, "\n".join(texts)
 
 
-class SchoologyAlbumsDownloader:
-    def __init__(
-        self, timeout: int = 30, headless: bool = True, subdomain: str = ""
-    ) -> None:
-        self._timeout = timeout
-        self._base_url = f"https://{subdomain}.schoology.com"
-        self.subdomain = subdomain
-        self._logger = logging.getLogger(SchoologyAlbumsDownloader.__class__.__name__)
-        options = Options()
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-search-engine-choice-screen")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1920,1080")
-        if headless:
-            options.add_argument("--headless=new")
-        self.driver = webdriver.Chrome(options=options)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
-        }
-        self.session = requests.session()
-        self.session.headers.update(headers)
-        self._config_file = Path(".sadc.conf")
-        self._load_config()
+def build_email_html(settings: Settings, post: Post, header: str, summaries: list[str]) -> str:
+    parts = [
+        f'<a href="{settings.homeroom_course_url}">View updates on Schoology</a>',
+        "<br/><br/>",
+        header,
+        "<br/><br/>",
+        post.html_content,
+    ]
+    for summary_html in summaries:
+        parts.extend(["<hr/>", summary_html])
+    return "\n".join(parts)
 
-    def __del__(self) -> None:
-        pass
 
-    def _save_config(self) -> None:
-        self._logger.info(f"Saving config file to {self._config_file}")
-        with open(self._config_file, "w") as f:
-            json.dump(self.config, f, indent=2, ensure_ascii=False)
+def handle_post(
+    settings: Settings,
+    client: SchoologyClient,
+    post: Post,
+    state: State,
+    dry_run: bool = False,
+    no_bcc: bool = False,
+) -> None:
+    client.expand(post)
+    client.download_attachments(
+        post,
+        settings.attachments_dir / post.post_id,
+        settings.max_attachment_mb,
+        settings.max_pdf_mb,
+    )
 
-    def _load_config(self) -> None:
-        if self._config_file.exists():
-            self._logger.info(f"Loading config from {self._config_file}")
-            with open(self._config_file, "r") as f:
-                self.config = json.load(f)
-        else:
-            self._logger.info("Config file not found, initializing default config")
-            self.config = {"course_id": "", "downloaded": {}, "updates": {}}
+    posted_at = post.posted_at
+    header = f"On {posted_at:%b %d, %Y at %I:%M %p}, {post.author} posted:"
+    attachment_paths, attachment_text = collect_attachments(post, settings.max_email_attachment_mb)
 
-    def _save_cookies(self, cookie_file: str) -> None:
-        self._logger.info(f"Saving cookies to {cookie_file} ...")
-        cookies = self.driver.get_cookies()
-        # pickle.dump(cookies, open(cookie_file,"wb"))
-        for cookie in cookies:
-            if "expiry" in cookie:
-                cookie["expires"] = cookie["expiry"]
-                del cookie["expiry"]
-            self.session.cookies.set(
-                cookie["name"], cookie["value"], path=cookie["path"]
-            )
-
-    def _load_cookies(self, cookie_file: str) -> None:
-        self._logger.info(f"Loading cookies from {cookie_file}")
-        cookies = pickle.load(open(cookie_file, "rb"))
-        self.driver.execute_cdp_cmd("Network.enable", {})
-        for cookie in cookies:
-            if "expiry" in cookie:
-                cookie["expires"] = cookie["expiry"]
-                del cookie["expiry"]
-            self.driver.execute_cdp_cmd("Network.setCookie", cookie)
-            self.session.cookies.set(
-                cookie["name"], cookie["value"], path=cookie["path"]
-            )
-        self.driver.execute_cdp_cmd("Network.disable", {})
-
-    def _wait(self, seconds: int) -> None:
-        self._logger.info(f"Wait for {seconds} seconds ...")
-        time.sleep(seconds)
-
-    def download_media(self, url: str, download_path: Path = Path().resolve()) -> Path:
-        with self.session.get(url, stream=True, allow_redirects=True) as r:
-            if "content-disposition" not in r.headers:
-                fname = "".join(random.choices(ascii_lowercase + digits, k=16))
-            else:
-                d = r.headers["content-disposition"]
-                fname = re.findall('filename="(.+)"', d)[0]
-                fname = fname.replace("/", ".")
-
-            full_path = download_path / fname
-
-            self._logger.info(f"Downloading media {url} to {full_path} ...")
-
-            if full_path.exists():
-                self._logger.info(f"{full_path} already downloaded, skip ...")
-                return full_path
-
-            with open(full_path, "wb") as f:
-                r.raw.decode_content = True
-                shutil.copyfileobj(r.raw, f)
-
-            return full_path
-
-    def get_updates(self):
-        course_id = self.config["course_id"]
-        with self.session.get(
-            f"{self._base_url}/course/{course_id}/feed?filter=1",
-            stream=True,
-            allow_redirects=True,
-        ) as r:
-            r.raw.decode_content = True
-            result = r.raw.data.decode("unicode-escape").replace("\\/", "/")
-            posts = self.parse_posts(result)
-            return posts
-
-    def _get_file_size_in_mb(self, file_path):
-        return os.path.getsize(file_path) / (1024 * 1024)  # Convert bytes to MB
-
-    def parse_posts(self, html):
-        soup = BeautifulSoup(html, "html.parser")
-        posts = soup.find_all("li", {"class": ["first", ""]})
-
-        parsed_posts = []
-
-        for post in posts:
-            # Extract post id
-            post_id = post.get("id", "").replace("edge-assoc-", "")
-
-            # Extract date and time
-            post_datetime = post.find("span", {"class": "small gray"})
-            post_datetime = post_datetime.text if post_datetime else ""
-
-            # Extract author's name and profile picture
-            author = post.find("a", {"title": "View user profile."})
-            author_name = author.text if author else ""
-
-            profile_pic = post.find(
-                "img", {"class": "imagecache imagecache-profile_sm"}
-            )
-            profile_pic_url = profile_pic.get("src", "") if profile_pic else ""
-
-            # Extract main content
-            content_span = post.find("span", {"class": "update-body s-rte"})
-            html_content = content_span.prettify() if content_span else ""
-
-            content = content_span.get_text() if content_span else ""
-
-            # Check if there is a "Show More" link
-            show_more_link = post.find("a", {"class": "show-more-link"})
-            show_more_href = show_more_link.get("href", "") if show_more_link else ""
-
-            images = [img.get("src", "") for img in content_span.find_all("img")]
-
-            if show_more_href:
-                logging.info(f"Loading additional content for post {post_id} ...")
-                with self.session.post(
-                    f"{self._base_url}{show_more_href}",
-                    stream=True,
-                    allow_redirects=True,
-                ) as r:
-                    if r.status_code == 200:
-                        data = r.json()["update"]
-                        # Parse the additional content using BeautifulSoup
-                        additional_content_soup = BeautifulSoup(data, "html.parser")
-                        html_content = additional_content_soup.prettify()
-                        content = additional_content_soup.get_text()
-                        images = [
-                            img.get("src", "")
-                            for img in additional_content_soup.find_all("img")
-                        ]
-
-            attachments_div = post.find("div", {"class": "attachments clearfix"})
-
-            attachments = []
-
-            # Only proceed if attachments_div is found
-            if attachments_div:
-                attachments_html_content = attachments_div.prettify()
-
-                for a in attachments_div.find_all("a"):
-                    href = a.get("href")  # Get the href attribute (attachment link)
-                    url = self._base_url + href
-
-                    # Find the first <span> child within the <a> tag
-                    span = a.find("span")
-                    if span:
-                        filename = span.get(
-                            "aria-label"
-                        )  # Get the aria-label attribute (attachment filename)
-                        attachments.append({"url": url, "filename": filename})
-            else:
-                attachments_html_content = ""
-
-            cwd = Path().resolve()
-            attachment_download_path = cwd / "attachments"
-            attachment_download_path.mkdir(exist_ok=True)
-
-            for attachment in attachments:
-                full_path = str(
-                    self.download_media(
-                        url=attachment["url"], download_path=attachment_download_path
-                    )
-                )
-                attachment["full_path"] = full_path
-                if (
-                    full_path.lower().endswith("pdf")
-                    and self._get_file_size_in_mb(full_path) <= 20
-                ):  # Only process files less than 20MB
-                    text = extract_text_from_pdf(full_path)
-                    attachment["text"] = text
-
-            parsed_posts.append(
-                {
-                    "post_id": post_id,
-                    "datetime": post_datetime,
-                    "author": author_name,
-                    "profile_pic_url": profile_pic_url,
-                    "content": content.strip(),
-                    "html_content": html_content,
-                    "attachments_html_content": attachments_html_content,
-                    "show_more_href": show_more_href,
-                    "images": images,
-                    "attachments": attachments,
-                }
-            )
-
-        return parsed_posts
-
-    def schoology_login(self, email: str, password: str) -> None:
-        schoology_cookie_file = "schoology_cookies.pkl"
-
-        if os.path.exists(schoology_cookie_file) and os.path.isfile(
-            schoology_cookie_file
-        ):
-            self._load_cookies(schoology_cookie_file)
-            return
-
-        self.driver.get(self._base_url)
-
-        self._logger.info("Loading the login page")
-
-        self._wait(5)
-
-        self._logger.info("Waiting for email input field...")
-        email_input = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located((By.NAME, "loginfmt"))
+    if dry_run:
+        logger.info(
+            "[dry run] Would summarise and send post %s: %s | %d chars | %d attachments",
+            post.post_id, header, len(post.content), len(attachment_paths),
         )
-        self._logger.info("Email input field found.")
+        return
 
-        self._logger.info("Waiting for Next button...")
-        next_button = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located((By.ID, "idSIButton9"))
+    summary = summarize(
+        f"{header}\n\n{post.content}\n\n{attachment_text}",
+        settings.summary_model,
+        posted_on=f"{posted_at:%A, %B %d, %Y}",
+    )
+    summaries = [markdown_to_html(summary)]
+    for language in settings.translation_languages:
+        summaries.append(
+            markdown_to_html(translate(summary, language, settings.translation_model))
         )
-        self._logger.info("Next button found.")
 
-        self._logger.info("Filling in the email")
+    subject = f"{settings.homeroom_class} Homeroom Updates {posted_at:%Y%m%d}".strip()
+    send_email(
+        settings,
+        subject,
+        build_email_html(settings, post, header, summaries),
+        attachment_paths,
+        bcc=[] if no_bcc else None,
+    )
 
-        email_input.clear()
-        email_input.send_keys(email)
-        next_button.click()
-
-        self._wait(5)
-
-        self._logger.info("Waiting for password input field...")
-        password_input = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located((By.NAME, "passwd"))
-        )
-        self._logger.info("Password input field found.")
-
-        self._logger.info("Waiting for Submit button...")
-        submit_button = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located((By.ID, "idSIButton9"))
-        )
-        self._logger.info("Submit button found.")
-
-        self._logger.info("Filling in the password")
-
-        password_input.clear()
-        password_input.send_keys(password)
-        submit_button.click()
-
-        self._wait(5)
-
-        self._logger.info("Waiting for Stay signed in button...")
-        stay_signed_in_button = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located((By.ID, "idSIButton9"))
-        )
-        self._logger.info("Stay signed in button found.")
-
-        self._logger.info(f"Logging in with the email: '{email}'")
-
-        stay_signed_in_button.click()
-
-        self._wait(5)
-
-        # Find the button and switch to student account
-        self._logger.info("Waiting for 'Parents of' drop down menu...")
-        drop_down_menu = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located(
-                (By.XPATH, '//div[contains(text(), "Parents of")]')
-            )
-        )
-        self._logger.info("Drop down menu found.")
-
-        self._logger.info("Swiching to children account ...")
-
-        drop_down_menu.click()
-
-        self._wait(5)
-
-        # Find the button and switch to student account
-        self._logger.info("Waiting for switch child link...")
-        switch_child_link = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located(
-                (By.XPATH, '//a[contains(@href,"/parent/switch_child/")]')
-            )
-        )
-        self._logger.info("Switch child link found.")
-
-        switch_child_link.click()
-
-        self._wait(5)
-
-        self._logger.info("Opening homeroom course ...")
-        # Find homeroom link
-        self._logger.info("Waiting for Homeroom link...")
-        homeroom_link = WebDriverWait(self.driver, self._timeout).until(
-            EC.presence_of_element_located(
-                (By.XPATH, '//a[contains(text(),"Homeroom")]')
-            )
-        )
-        self._logger.info("Homeroom link found.")
-
-        homeroom_link.click()
-
-        self._wait(5)
-
-        # Find course id
-        current_url = str(self.driver.current_url)
-        course_id = current_url[36:46]
-        self.config["course_id"] = course_id
-
-        self._save_cookies(schoology_cookie_file)
-
-        self.driver.close()
+    # Recorded only after the mail is actually accepted by the SMTP server, and
+    # flushed immediately so a later failure cannot cause a re-send.
+    state.mark_sent(post.post_id, subject, posted_at.isoformat(timespec="minutes"))
+    state.save()
 
 
-def convert_to_date(date_str):
-    # Get the current date for "Today at" case
-    today = datetime.now().strftime("%b %d, %Y")
+def run(
+    settings: Settings, auth: SchoologyAuth, dry_run: bool = False, no_bcc: bool = False
+) -> int:
+    state = State.load(settings.state_file)
 
-    # Handle "Today at" format
-    if "Today at" in date_str:
-        date_str = date_str.replace("Today", today)
-        return datetime.strptime(date_str, "%b %d, %Y at %I:%M %p")
+    auth.course_id = settings.course_id or state.course_id
+    session = auth.session()
 
-    # Handle general "Day Mon DD, YYYY at hh:mm AM/PM" format
+    course_id = auth.course_id
+    if not course_id:
+        raise RuntimeError("No course id: set SCHOOLOGY_COURSE_ID or HOMEROOM_COURSE_URL")
+    if state.course_id != course_id:
+        state.course_id = course_id
+        state.save()
+
+    client = SchoologyClient(session, settings.base_url, settings.http_timeout)
+    client.enter_course_as_parent(course_id, settings.child_uid)
+    posts = client.parse_posts(client.fetch_feed(course_id))
+    new_posts = [p for p in reversed(posts) if not state.is_sent(p.post_id)]
+    logger.info("%d posts in the feed, %d not sent yet", len(posts), len(new_posts))
+
+    failures = []
+    for post in new_posts:
+        try:
+            handle_post(settings, client, post, state, dry_run, no_bcc)
+        except Exception:
+            logger.exception("Post %s failed", post.post_id)
+            failures.append(f"Post {post.post_id} ({post.datetime_text}):\n{traceback.format_exc()}")
+
+    if failures:
+        # A dry run must stay silent: no mail of any kind, error mail included.
+        if not dry_run:
+            notify_error(settings, "\n\n".join(failures))
+        return 1
+    return 0
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Sign in, read the feed and fetch attachments, but send nothing, "
+             "call no models, and record nothing. Safe to run at any time.",
+    )
+    parser.add_argument(
+        "--no-bcc",
+        action="store_true",
+        help="Mail only SUMMARY_RECEIVER_EMAIL, ignoring BCC_EMAILS entirely.",
+    )
+    parser.add_argument("-v", "--verbose", action="store_true", help="Log at DEBUG level")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s: %(message)s",
+        level=logging.DEBUG if args.verbose else logging.INFO,
+    )
+
     try:
-        return datetime.strptime(date_str, "%a %b %d, %Y at %I:%M %p")
-    except ValueError:
-        raise ValueError("The provided date string is in an unrecognized format.")
+        settings = Settings.load()
+    except ConfigError as exc:
+        logger.error("Configuration error: %s", exc)
+        return 2
 
-
-def main():
-    downloader = None
+    auth = SchoologyAuth(settings)
     try:
-        EMAIL = os.environ.get("SCHOOLOGY_EMAIL", "")
-        PASSWORD = os.environ.get("SCHOOLOGY_PASSWORD", "")
-        SUBDOMAIN = os.environ.get("SCHOOLOGY_SUBDOMAIN", "")
-        HOMEROOM_CLASS = os.environ.get("HOMEROOM_CLASS")
-        HOMEROOM_COURSE_URL = os.environ.get("HOMEROOM_COURSE_URL")
-        SUMMARY_SENDER_EMAIL = os.environ.get("SUMMARY_SENDER_EMAIL")
-        SUMMARY_RECEIVER_EMAIL = os.environ.get("SUMMARY_RECEIVER_EMAIL")
-        BCC_EMAILS_ENV = os.environ.get("BCC_EMAILS")
-        BCC_EMAILS = BCC_EMAILS_ENV.split(",") if BCC_EMAILS_ENV else []
-
-        downloader = SchoologyAlbumsDownloader(headless=True, subdomain=SUBDOMAIN)
-        downloader.schoology_login(EMAIL, PASSWORD)
-        posts = downloader.get_updates()
-        for post in reversed(posts):
-            if post["post_id"] not in downloader.config["updates"]:
-                attachment_file_paths = []
-                attachments_text = ""
-                if post["attachments"]:
-                    for attachment in post["attachments"]:
-                        if "text" in attachment and attachment["text"]:
-                            attachments_text += "\n" + attachment["text"]
-                            attachment_file_paths.append(attachment["full_path"])
-
-                dt = convert_to_date(post["datetime"])
-                post_datetime = dt.strftime("%b %d, %Y at %I:%M %p")
-                update_content = f"On {post_datetime}, {post['author']} posted:\n\n{post['content']}\n\n{attachments_text}"
-
-                summary = summarize(update_content)
-                japanese_summary = translate(summary, "Japanese")
-                chinese_summary = translate(summary, "Chinese")
-
-                summary_html = markdown_to_html(summary)
-                japanese_summary_html = markdown_to_html(japanese_summary)
-                chinese_summary_html = markdown_to_html(chinese_summary)
-
-                post_date_ymd = dt.strftime("%Y%m%d")
-                logging.info(
-                    f"Sending email from {SUMMARY_SENDER_EMAIL} to {SUMMARY_RECEIVER_EMAIL} and BCC to {BCC_EMAILS}"
-                )
-
-                # Construct the html content with the attachments section
-                html_content = (
-                    f"<a href={HOMEROOM_COURSE_URL}>View updates on schoology</a>\n<br/><br/>\n"
-                    + f"On {post_datetime}, {post['author']} posted:"
-                    + "\n<br/><br/>\n"
-                    + post["html_content"]
-                    + "\n<hr/>\n"
-                    + summary_html
-                    + "\n<hr/>\n"
-                    + japanese_summary_html
-                    + "\n<hr/>\n"
-                    + chinese_summary_html
-                )
-                send_email(
-                    SUMMARY_SENDER_EMAIL,
-                    SUMMARY_RECEIVER_EMAIL,
-                    BCC_EMAILS,
-                    f"{HOMEROOM_CLASS} Homeroom Updates {post_date_ymd}",
-                    html_content,
-                    attachment_file_paths,
-                )
-                downloader.config["updates"][post["post_id"]] = post
-        downloader._save_config()
-    except Exception as e:
-        import traceback
-        error_message = traceback.format_exc()
-        logging.error(f"Script failed: {error_message}")
-        
-        error_attachments = []
-        if downloader and downloader.driver:
-            try:
-                screenshot_path = "error_screenshot.png"
-                downloader.driver.save_screenshot(screenshot_path)
-                error_attachments.append(screenshot_path)
-                logging.info(f"Screenshot saved to {screenshot_path}")
-            except Exception as screenshot_error:
-                logging.error(f"Failed to take screenshot: {screenshot_error}")
-
-        notify_error(error_message, error_attachments)
+        if settings.bcc_emails and not args.no_bcc:
+            logger.info("BCC is on: %d addresses", len(settings.bcc_emails))
+        return run(settings, auth, dry_run=args.dry_run, no_bcc=args.no_bcc)
+    except Exception:
+        message = traceback.format_exc()
+        logger.error("Run failed:\n%s", message)
+        screenshots = [auth.screenshot] if auth.screenshot else []
+        notify_error(settings, message, screenshots)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
