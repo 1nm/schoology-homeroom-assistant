@@ -3,3 +3,4 @@
 mcp
 faiss-cpu
 numpy
+uvicorn

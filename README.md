@@ -60,7 +60,9 @@ wrote in: a Chinese question finds the right English post, which keyword search
 cannot do at all.
 
 `--host` must name an interface; binding `0.0.0.0` is refused, because the archive
-holds photographs of other people's children.
+holds photographs of other people's children. Over HTTP, pass `--token` (or set
+`MCP_TOKEN`) and send it as `Authorization: Bearer <token>`; without one, anyone
+who can reach the port can read everything.
 
 For Claude Desktop on another machine, stdio travels over ssh:
 

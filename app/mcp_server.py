@@ -12,18 +12,19 @@ beats answering from whatever a single top-k lookup happened to return.
 from __future__ import annotations
 
 import argparse
-import asyncio
 import hashlib
 import json
 import logging
 import math
 import os
 import re
+import secrets
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
 import pymupdf
+import uvicorn
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -446,6 +447,32 @@ def list_posts(limit: int = 20) -> list[dict]:
     return found
 
 
+class RequireBearerToken:
+    """Reject anything without the shared token.
+
+    Raw ASGI rather than BaseHTTPMiddleware, which buffers responses and would
+    break the streaming transport.
+    """
+
+    def __init__(self, app, token: str) -> None:
+        self.app = app
+        self.expected = f"Bearer {token}"
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        offered = dict(scope.get("headers") or {}).get(b"authorization", b"").decode()
+        if not secrets.compare_digest(offered, self.expected):
+            body = b'{"error":"unauthorized"}'
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [(b"content-type", b"application/json"),
+                                    (b"content-length", str(len(body)).encode())]})
+            await send({"type": "http.response.body", "body": body})
+            return
+        await self.app(scope, receive, send)
+
+
 def main() -> None:
     global DATA_DIR
     parser = argparse.ArgumentParser(description=__doc__)
@@ -457,6 +484,10 @@ def main() -> None:
                         help="address to bind when serving over HTTP, e.g. 10.0.0.4 or a "
                              "Tailscale address. Never 0.0.0.0: this archive is private.")
     parser.add_argument("--port", type=int, default=8848)
+    parser.add_argument("--token", default=os.environ.get("MCP_TOKEN", ""),
+                        help="require this bearer token over HTTP (or set MCP_TOKEN). "
+                             "Without one the archive is readable by anyone who can "
+                             "reach the port.")
     parser.add_argument("--build-index", action="store_true",
                         help="build the semantic index and exit")
     args = parser.parse_args()
@@ -482,12 +513,15 @@ def main() -> None:
                        f"localhost:{args.port}"],
         allowed_origins=["*"],
     )
+    app = server.streamable_http_app(transport_security=security, host=args.host)
+    if args.token:
+        app = RequireBearerToken(app, args.token)
+        logger.info("Requiring a bearer token")
+    else:
+        logger.warning("No --token given: anyone who can reach %s:%d can read the "
+                       "archive", args.host, args.port)
     logger.info("Listening on http://%s:%d/mcp", args.host, args.port)
-    asyncio.run(
-        server.run_streamable_http_async(
-            host=args.host, port=args.port, transport_security=security
-        )
-    )
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 
 if __name__ == "__main__":
