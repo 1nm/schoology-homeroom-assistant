@@ -1,0 +1,5 @@
+# The MCP server only; the sync pipeline does not need these.
+-r requirements.txt
+mcp
+faiss-cpu
+numpy

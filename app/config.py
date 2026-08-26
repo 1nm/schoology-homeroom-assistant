@@ -62,6 +62,15 @@ class Settings:
     course_id: str
     child_uid: str
 
+    # Materials mirror (REST API)
+    api_consumer_key: str
+    api_consumer_secret: str
+    materials_skip_folders: frozenset
+    max_material_mb: float
+    sync_albums: bool
+    album_originals: bool
+    max_album_mb: float
+
     # Mail
     sender_email: str
     receiver_email: str
@@ -115,6 +124,17 @@ class Settings:
             course_id=_get("SCHOOLOGY_COURSE_ID")
             or course_id_from_url(homeroom_course_url),
             child_uid=_get("SCHOOLOGY_CHILD_UID"),
+            api_consumer_key=_get("SCHOOLOGY_API_CONSUMER_KEY"),
+            api_consumer_secret=_get("SCHOOLOGY_API_CONSUMER_SECRET"),
+            materials_skip_folders=frozenset(
+                f.strip() for f in _get("MATERIALS_SKIP_FOLDERS").split(",") if f.strip()
+            ),
+            max_material_mb=_get_number("MAX_MATERIAL_MB", 50),
+            # Off by default: the class albums run to several GB.
+            sync_albums=_get_bool("SYNC_ALBUMS", False),
+            # Originals are ~7MB each; the alternative is a 600x600 thumbnail.
+            album_originals=_get_bool("ALBUM_ORIGINALS", True),
+            max_album_mb=_get_number("MAX_ALBUM_MB", 50),
             sender_email=sender_email,
             receiver_email=_get("SUMMARY_RECEIVER_EMAIL") or sender_email,
             bcc_emails=[e.strip() for e in bcc_raw.split(",") if e.strip()],
@@ -149,6 +169,23 @@ class Settings:
     @property
     def error_state_file(self) -> Path:
         return self.data_dir / ".error_notify.json"
+
+    @property
+    def materials_enabled(self) -> bool:
+        """Materials come from the REST API, which needs its own credentials."""
+        return bool(self.api_consumer_key and self.api_consumer_secret)
+
+    @property
+    def materials_dir(self) -> Path:
+        return self.data_dir / "materials"
+
+    @property
+    def posts_dir(self) -> Path:
+        return self.data_dir / "posts"
+
+    @property
+    def albums_dir(self) -> Path:
+        return self.materials_dir / "Photos"
 
     @property
     def attachments_dir(self) -> Path:

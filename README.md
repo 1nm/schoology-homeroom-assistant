@@ -1,7 +1,11 @@
 # Get Schoology Updates
 
-Watches a Schoology course feed and mails every new homeroom post to the parents,
-with an AI summary and translations attached below the original text.
+Watches one Schoology homeroom and keeps a local copy of it:
+
+- mails every new post to the parents, with an AI summary and translations;
+- mirrors the course materials (PDFs, pages, class photo albums) to disk and mails
+  what changed;
+- serves the whole archive over MCP so an agent can search and read it.
 
 ## How a run works
 
@@ -17,6 +21,54 @@ with an AI summary and translations attached below the original text.
    summarise, translate, mail, then record the post and flush the state file.
    A post is recorded only once the SMTP server has accepted the message, so a
    crash mid-run neither re-sends nor loses a post.
+
+## Materials
+
+Materials come from the Schoology REST API rather than the browser: request a key
+at `https://<subdomain>.schoology.com/api` and set `SCHOOLOGY_API_CONSUMER_KEY`
+and `SCHOOLOGY_API_CONSUMER_SECRET`.
+
+A parent's key can read materials but **not** the course feed --
+`OPTIONS /sections/<id>/updates` answers with an empty `Allow` header, while
+`/documents` answers `Allow: GET` -- so posts still come from the scraped feed
+and materials come from the API. Every attachment carries an md5, so a file counts
+as changed only when its bytes do.
+
+The first run mirrors everything and mails a list without attachments; later runs
+mail only what changed, with the new files attached. Class photo albums are off by
+default (`SYNC_ALBUMS`) because they run to several GB, and they are never listed
+in the mail -- they are archived, not news.
+
+## Asking questions about it (MCP)
+
+```shell
+pip install -r requirements-mcp.txt
+python app/mcp_server.py --data-dir ~/homeroom --build-index   # once, and after a sync
+python app/mcp_server.py --data-dir ~/homeroom                 # stdio
+python app/mcp_server.py --data-dir ~/homeroom --http --host 10.0.0.4
+```
+
+The server retrieves and reads; it does not answer. `search()` blends exact keyword
+matching with FAISS semantic search, `read_document()` returns a whole document,
+and `get_file()`/`get_photos()` hand back the originals -- local path, a Schoology
+URL that opens in a signed-in browser, and images inline. An agent can then iterate:
+search, read the document in full, search again. That beats answering from whatever
+a single top-k lookup returned, and it is why there is no `ask()` tool.
+
+Semantic search also makes the archive answerable in a language the teacher never
+wrote in: a Chinese question finds the right English post, which keyword search
+cannot do at all.
+
+`--host` must name an interface; binding `0.0.0.0` is refused, because the archive
+holds photographs of other people's children.
+
+For Claude Desktop on another machine, stdio travels over ssh:
+
+```json
+{"mcpServers": {"homeroom": {"command": "ssh", "args": [
+  "user@10.0.0.4",
+  "/path/to/.venv/bin/python /path/to/app/mcp_server.py --data-dir /path/to/data"]}}}
+```
 
 ## Configuration
 
@@ -36,6 +88,10 @@ is not on the page — during the summer holiday, for instance.
 | `.schoology_cookies.json` | the reusable session, mode `600` |
 | `.error_notify.json` | throttling record so an identical failure is not mailed every run |
 | `attachments/<post_id>/` | files downloaded for that post |
+| `posts/<date>-<id>.md` | the teacher's original text, plus the summary that was mailed |
+| `materials/` | the course materials, mirroring the folder tree, plus `index.json` |
+| `materials/Photos/<album>/` | class photos at original resolution |
+| `.semantic/`, `.textcache/` | the FAISS index and extracted PDF text |
 | `error_screenshot.png` | the page the browser was on when a sign-in failed |
 
 ## Run

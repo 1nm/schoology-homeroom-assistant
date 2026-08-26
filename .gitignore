@@ -602,3 +602,9 @@ attachments
 .schoology_cookies.json
 .error_notify.json
 .venv/
+
+# Mirrored course content and derived indexes
+posts/
+materials/
+.semantic/
+.textcache/

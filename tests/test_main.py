@@ -159,8 +159,11 @@ class TestRun:
         # The expensive work only happens for the new post -- the old script
         # downloaded every attachment of every post on every single run.
         assert client.downloaded == ["222"]
-        assert client.expanded == ["222"]
         assert len(fake_pipeline) == 1
+        # Both posts get an archive entry, though: the sent one is backfilled.
+        assert sorted(p.name.split("-")[-1] for p in settings.posts_dir.glob("*.md")) == [
+            "111.md", "222.md"
+        ]
 
     def test_processes_oldest_first(self, settings, auth, fake_pipeline, monkeypatch):
         posts = [make_post("333", content="newest"), make_post("222"), make_post("111", content="oldest")]

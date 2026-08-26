@@ -26,6 +26,7 @@ class State:
     path: Path
     course_id: str = ""
     sent: dict[str, dict] = field(default_factory=dict)
+    materials: dict[str, dict] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> "State":
@@ -47,7 +48,12 @@ class State:
                 for post_id, post in legacy.items()
             }
 
-        return cls(path=path, course_id=raw.get("course_id", ""), sent=sent)
+        return cls(
+            path=path,
+            course_id=raw.get("course_id", ""),
+            sent=sent,
+            materials=raw.get("materials", {}),
+        )
 
     def is_sent(self, post_id: str) -> bool:
         return post_id in self.sent
@@ -61,7 +67,11 @@ class State:
 
     def save(self) -> None:
         self._prune()
-        payload = {"course_id": self.course_id, "sent": self.sent}
+        payload = {
+            "course_id": self.course_id,
+            "sent": self.sent,
+            "materials": self.materials,
+        }
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(tmp, "w", encoding="utf-8") as f:
