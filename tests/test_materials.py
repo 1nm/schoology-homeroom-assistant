@@ -161,3 +161,64 @@ class TestDryRun:
         assert known == {}
         assert not (tmp_path / "index.json").exists()
         assert not (tmp_path / "Class Information").exists()
+
+
+class TestAlbums:
+    """Photos are never mailed, so their state has to be recorded on its own --
+    a run that forgets re-downloads several GB."""
+
+    @pytest.fixture
+    def api(self):
+        album = {"id": "77", "title": "Week 1"}
+        content = [{
+            "id": "900", "type": "image", "display_order": "1",
+            "content_url": "https://cdn/thumb.jpg", "content_filesize": "9",
+            "content_md5_checksum": hashlib.md5(b"real bytes").hexdigest(),
+            "attachments": {"files": {"file": [{
+                "filename": "IMG_0001.jpg", "filesize": "10",
+                "download_path": "https://api/original"}]}},
+        }]
+
+        class AlbumAPI(FakeAPI):
+            def albums(self, section_id):
+                return [album]
+
+            def album_content(self, section_id, album_id):
+                return content
+
+        return AlbumAPI([], {}, {}, {"https://api/original": b"real bytes"})
+
+    def test_originals_are_preferred_over_the_thumbnail(self, api, tmp_path):
+        materials.sync_albums(api, "SEC", tmp_path, {}, originals=True)
+        assert (tmp_path / "Week 1" / "IMG_0001.jpg").exists()
+
+    def test_the_thumbnail_is_used_when_originals_are_off(self, api, tmp_path):
+        materials.sync_albums(api, "SEC", tmp_path, {}, originals=False)
+        assert (tmp_path / "Week 1" / "0001-900.jpg").exists()
+
+    def test_a_known_photo_is_not_downloaded_again(self, api, tmp_path):
+        known = {}
+        materials.sync_albums(api, "SEC", tmp_path, known, originals=True)
+        assert known, "the sync must record what it fetched"
+        api.downloaded.clear()
+
+        report = materials.sync_albums(api, "SEC", tmp_path, known, originals=True)
+
+        assert report.changes == []
+        assert api.downloaded == []
+
+    def test_a_photo_already_on_disk_is_not_refetched_when_the_state_is_lost(
+        self, api, tmp_path
+    ):
+        materials.sync_albums(api, "SEC", tmp_path, {}, originals=True)
+        api.downloaded.clear()
+
+        materials.sync_albums(api, "SEC", tmp_path, {}, originals=True)
+
+        assert api.downloaded == [], "6GB of photos must not be fetched twice"
+
+    def test_dry_run_downloads_nothing(self, api, tmp_path):
+        known = {}
+        report = materials.sync_albums(api, "SEC", tmp_path, known, dry_run=True)
+        assert len(report.changes) == 1
+        assert api.downloaded == [] and known == {}

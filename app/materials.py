@@ -307,6 +307,14 @@ def sync_albums(
                 logger.info("Skipping %s (%.0f MB exceeds the cap)", name, size / 1024 / 1024)
                 continue
 
+            # The state can be behind the disk. Photos are big, so check before
+            # spending the bandwidth again.
+            already_correct = (
+                target.exists()
+                and (not size or target.stat().st_size == size)
+                and (not md5 or _md5(target) == md5)
+            )
+
             change = Change(
                 kind="new" if previous is None else "updated",
                 folder=title,
@@ -319,15 +327,17 @@ def sync_albums(
                 report.changes.append(change)
                 continue
 
-            try:
-                api.download(url, target, 0)
-            except (SchoologyAPIError, OSError) as exc:
-                logger.warning("Could not download %s: %s", name, exc)
-                report.errors.append(f"{title}/{name}: {exc}")
-                continue
-
-            report.files_downloaded += 1
-            report.bytes_downloaded += target.stat().st_size
+            if already_correct:
+                logger.debug("%s is already on disk", target)
+            else:
+                try:
+                    api.download(url, target, 0)
+                except (SchoologyAPIError, OSError) as exc:
+                    logger.warning("Could not download %s: %s", name, exc)
+                    report.errors.append(f"{title}/{name}: {exc}")
+                    continue
+                report.files_downloaded += 1
+                report.bytes_downloaded += target.stat().st_size
             report.changes.append(change)
             known[key] = {
                 "fingerprint": md5,

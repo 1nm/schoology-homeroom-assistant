@@ -191,8 +191,12 @@ def sync_materials(
         report.files_downloaded, report.bytes_downloaded / 1024 / 1024,
     )
 
+    # Photos are archived to disk but never mailed, so they must still be recorded
+    # here: without this the next run re-downloads every one of them.
+    if album_report.changes and not dry_run:
+        state.save()
+
     if not report.changes:
-        # Photos are archived to disk but never mailed: they are not news.
         logger.info("No material changes to report")
         return
 
