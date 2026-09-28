@@ -45,10 +45,42 @@ def default_min_face() -> float:
 
 
 def default_min_prominence() -> float:
-    """Smallest face relative to the largest face in the same photo. In a group shot
-    every face is about the same size; when a few faces dominate and this one is
-    small, the child was only in the background."""
-    return float(os.environ.get("FACE_MIN_PROMINENCE", "0.5"))
+    """Smallest face relative to the largest face in the same photo, below which a
+    photo is not reported at all. Off by default: see default_frame_below."""
+    return float(os.environ.get("FACE_MIN_PROMINENCE", "0"))
+
+
+def default_frame_below() -> float:
+    """When the child's face is this much smaller than the largest face in the
+    photo, they were in the background: show the photo reframed around them
+    instead of the whole frame (in sheets and in what the bot hands back)."""
+    return float(os.environ.get("FACE_FRAME_BELOW", "0.5"))
+
+
+def frame_around(image, box: list[int], context: float = 6.0, min_share: float = 0.45):
+    """Crop `image` (PIL) to a window centred on the face box: `context` face-heights
+    tall, never less than `min_share` of the short edge, same aspect as the photo,
+    clamped to the picture."""
+    w, h = image.size
+    x0, y0, x1, y1 = box
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    win_h = min(h, max(context * (y1 - y0), min_share * min(w, h)))
+    win_w = min(w, win_h * w / h)
+    left = int(min(max(0, cx - win_w / 2), w - win_w))
+    top = int(min(max(0, cy - win_h / 2), h - win_h))
+    return image.crop((left, top, int(left + win_w), int(top + win_h)))
+
+
+def render(data_dir: Path, match: "Match", max_edge: int = 900):
+    """The photo as a parent should see it: whole when the child is a proper part
+    of it, reframed around them when they were in the background. Downscaled."""
+    from PIL import Image, ImageOps
+
+    image = ImageOps.exif_transpose(Image.open(data_dir / match.path)).convert("RGB")
+    if match.box and match.prominence < default_frame_below():
+        image = frame_around(image, match.box)
+    image.thumbnail((max_edge, max_edge))
+    return image
 
 
 @dataclass
@@ -370,6 +402,8 @@ def contact_sheet(data_dir: Path, matches: list[Match], out: Path, label: bool =
             x0, y0, x1, y1 = m.box
             pad = int(max(x1 - x0, y1 - y0) * 0.35)
             crop = image.crop((max(0, x0 - pad), max(0, y0 - pad), x1 + pad, y1 + pad))
+        elif m.box and m.prominence < default_frame_below():
+            crop = frame_around(image, m.box)
         else:
             crop = image
         thumb = ImageOps.fit(crop, (THUMB, THUMB))

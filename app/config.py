@@ -167,7 +167,7 @@ class Settings:
             slack_mentions=[u.strip() for u in _get("SLACK_MENTIONS").split(",") if u.strip()],
             face_threshold=_get_number("FACE_THRESHOLD", 0.45),
             face_min_size=_get_number("FACE_MIN_SIZE", 0),
-            face_min_prominence=_get_number("FACE_MIN_PROMINENCE", 0.5),
+            face_min_prominence=_get_number("FACE_MIN_PROMINENCE", 0),
         )
 
     @property

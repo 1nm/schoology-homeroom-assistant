@@ -8,6 +8,7 @@ import pytest
 from PIL import Image
 
 import faces
+from faces import frame_around
 import main
 import slack_notify
 from materials import Change, SyncReport
@@ -178,7 +179,7 @@ def test_a_child_in_the_background_is_recorded_but_not_reported(archive, monkeyp
     # In IMG_5 the other face is three times taller: the child is background there.
     archive.scan()
     archive._load_cache()[album + "IMG_5.jpg"]["boxes"] = [[0, 0, 10, 10], [0, 0, 30, 30]]
-    found = archive.match("kid", 0.6)
+    found = archive.match("kid", 0.6, min_prominence=0.5)
     assert [Path(m.path).name for m in found] == ["IMG_1.jpg", "IMG_2.jpg", "IMG_3.jpg"]
     recorded = archive.matches()["kid"][album + "IMG_5.jpg"]
     assert recorded["prominence"] == pytest.approx(1 / 3, abs=0.01)
@@ -194,3 +195,26 @@ def test_small_faces_are_recorded_but_not_reported(archive, monkeypatch):
     assert len(archive.photos_of("kid", 0.6, min_face=0.3)) == 4
     monkeypatch.setenv("FACE_MIN_SIZE", "0.5")
     assert archive.photos_of("kid", 0.6) == []
+
+
+def test_frame_around_centres_the_face_and_stays_inside_the_picture():
+    image = Image.new("RGB", (400, 300), "grey")
+    # A 20px face near the right edge: the window is 45% of the short edge (135px
+    # tall, 180px wide), centred as far right as the picture allows.
+    crop = frame_around(image, [370, 140, 390, 160])
+    assert crop.size == (180, 135)
+    # and a face dead centre gives a window dead centre
+    assert frame_around(image, [190, 140, 210, 160]).size == (180, 135)
+
+
+def test_render_reframes_only_a_background_child(archive):
+    archive.learn("kid", faces._resolve_marks(archive, ["Week 4:1,2"]))
+    album = "materials/Photos/Week 4 (September)/"
+    archive.scan()
+    archive._load_cache()[album + "IMG_5.jpg"]["boxes"] = [[0, 0, 3, 3], [0, 0, 30, 30]]
+    by_name = {Path(m.path).name: m for m in archive.match("kid", 0.6)}
+    assert by_name["IMG_5.jpg"].prominence < 0.5 < by_name["IMG_1.jpg"].prominence
+    whole = faces.render(archive.data_dir, by_name["IMG_1.jpg"])
+    framed = faces.render(archive.data_dir, by_name["IMG_5.jpg"])
+    assert whole.size == (40, 30)
+    assert framed.size[0] < 40 and framed.size[1] < 30

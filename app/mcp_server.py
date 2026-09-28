@@ -431,7 +431,7 @@ def get_photos_of(person: str, limit: int = 4, offset: int = 0) -> list:
             ensure_ascii=False, indent=2,
         )
     ]
-    parts.extend(_inline_image(DATA_DIR / m.path) for m in window)
+    parts.extend(_person_image(m) for m in window)
     return parts
 
 
@@ -450,7 +450,7 @@ def get_photos(album: str, limit: int = 4, offset: int = 0, person: str = "") ->
     folder = folders[0]
     photos = sorted(f for f in folder.iterdir() if f.suffix.lower() in IMAGE_SUFFIXES)
     if person:
-        wanted = {DATA_DIR / m.path for m in faces.FaceIndex(DATA_DIR).photos_of(person.lower())}
+        wanted = {DATA_DIR / m.path: m for m in faces.FaceIndex(DATA_DIR).photos_of(person.lower())}
         photos = [p for p in photos if p in wanted]
     window = photos[offset:offset + min(limit, MAX_INLINE_PHOTOS)]
     parts: list = [
@@ -460,8 +460,17 @@ def get_photos(album: str, limit: int = 4, offset: int = 0, person: str = "") ->
             ensure_ascii=False, indent=2,
         )
     ]
-    parts.extend(_inline_image(p) for p in window)
+    parts.extend(_person_image(wanted[p]) if person else _inline_image(p) for p in window)
     return parts
+
+
+def _person_image(match: faces.Match) -> Image:
+    """A matched photo, reframed around the child when they were in the background."""
+    import io
+
+    buffer = io.BytesIO()
+    faces.render(DATA_DIR, match, PHOTO_MAX_EDGE).save(buffer, "JPEG", quality=70)
+    return Image(data=buffer.getvalue(), format="jpeg")
 
 
 def _inline_image(path: Path) -> Image:
