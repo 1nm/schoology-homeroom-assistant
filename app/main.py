@@ -20,6 +20,7 @@ import materials
 from auth import SchoologyAuth
 from config import ConfigError, Settings
 from mailer import notify_error, send_email
+import slack_notify
 from schoology import Post, SchoologyClient
 from schoology_api import SchoologyAPI
 from state import State
@@ -118,6 +119,12 @@ def handle_post(
     # flushed immediately so a later failure cannot cause a re-send.
     state.mark_sent(post.post_id, subject, posted_at.isoformat(timespec="minutes"))
     state.save()
+
+    # Slack comes last: the post is recorded either way, so a Slack hiccup is
+    # logged rather than allowed to cause a second mail.
+    slack_notify.notify_post(
+        settings, header, summary, dict(zip(settings.translation_languages, translated))
+    )
 
 
 def build_materials_html(
@@ -227,6 +234,8 @@ def sync_materials(
         bcc=[] if no_bcc else None,
     )
     state.save()
+    if not report.baseline:
+        slack_notify.notify_materials(settings, report.new, report.updated)
 
 
 def _materials_attachments(report: materials.SyncReport, budget_mb: float):

@@ -72,6 +72,14 @@ For Claude Desktop on another machine, stdio travels over ssh:
   "/path/to/.venv/bin/python /path/to/app/mcp_server.py --data-dir /path/to/data"]}}}
 ```
 
+## Slack
+
+Set `SLACK_BOT_TOKEN`, `SLACK_CHANNEL` and optionally `SLACK_MENTIONS` (comma separated
+user ids) and every new post is also posted to that channel -- the Chinese translation
+of the summary, with the parents mentioned -- along with a titles-only note when course
+materials change. The mail stays the system of record: Slack is posted after the post
+is recorded, and a Slack failure is logged, not retried.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and fill it in. The five required variables are

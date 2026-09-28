@@ -1,0 +1,84 @@
+"""Post homeroom updates to a Slack channel, next to the mail.
+
+Off unless SLACK_BOT_TOKEN and SLACK_CHANNEL are set. The message is a real
+Markdown block, so the summary the model wrote renders as written; a failure
+here is logged, never raised: the mail has already gone out and the post is
+already recorded, so there is nothing to retry.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import requests
+
+from config import Settings
+
+logger = logging.getLogger(__name__)
+
+SLACK_API = "https://slack.com/api/chat.postMessage"
+MAX_BLOCK_CHARS = 12000
+
+
+def enabled(settings: Settings) -> bool:
+    return bool(settings.slack_bot_token and settings.slack_channel)
+
+
+def mention_line(settings: Settings) -> str:
+    return " ".join(f"<@{uid}>" for uid in settings.slack_mentions)
+
+
+def post_markdown(settings: Settings, markdown: str, fallback: str) -> None:
+    """One message: `markdown` rendered as a Markdown block, `fallback` for notifications."""
+    if not enabled(settings):
+        return
+    response = requests.post(
+        SLACK_API,
+        headers={"Authorization": f"Bearer {settings.slack_bot_token}"},
+        json={
+            "channel": settings.slack_channel,
+            "text": fallback,
+            "blocks": [{"type": "markdown", "text": markdown[:MAX_BLOCK_CHARS]}],
+            "unfurl_links": False,
+        },
+        timeout=settings.http_timeout,
+    )
+    payload = response.json()
+    if not payload.get("ok"):
+        raise RuntimeError(f"Slack refused the message: {payload.get('error', response.text)}")
+
+
+def notify_post(settings: Settings, header: str, summary: str, translations: dict[str, str]) -> None:
+    """A new homeroom post: mention the parents, then the summary in their language."""
+    # Parents read Chinese first; fall back to whatever translation exists, then English.
+    body = translations.get("Chinese") or next(iter(translations.values()), summary)
+    text = "\n\n".join(
+        part for part in (
+            f"{mention_line(settings)} 📢 **New homeroom post**".strip(),
+            f"_{header}_",
+            body,
+            f"[View on Schoology]({settings.homeroom_course_url})" if settings.homeroom_course_url else "",
+        ) if part
+    )
+    _safe(settings, text, f"New homeroom post — {header}")
+
+
+def notify_materials(settings: Settings, new: list, updated: list) -> None:
+    """Changed course materials: titles only, the files are in the mail and the archive."""
+    if not new and not updated:
+        return
+    lines = [f"{mention_line(settings)} 📚 **Course materials updated**".strip()]
+    for heading, changes in (("New", new), ("Updated", updated)):
+        if changes:
+            lines.append(f"\n**{heading}**")
+            lines.extend(f"- {c.folder} — {c.title}" for c in changes)
+    if settings.homeroom_course_url:
+        lines.append(f"\n[View on Schoology]({settings.homeroom_course_url})")
+    _safe(settings, "\n".join(lines), f"Course materials: {len(new)} new, {len(updated)} updated")
+
+
+def _safe(settings: Settings, markdown: str, fallback: str) -> None:
+    try:
+        post_markdown(settings, markdown, fallback)
+    except Exception:  # noqa: BLE001 - see the module docstring
+        logger.exception("Could not post to Slack")

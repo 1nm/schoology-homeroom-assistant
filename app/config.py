@@ -93,6 +93,11 @@ class Settings:
     max_email_attachment_mb: float
     error_notify_interval_hours: float
 
+    # Slack: optional mirror of the mail into one channel.
+    slack_bot_token: str
+    slack_channel: str
+    slack_mentions: list[str]
+
     @classmethod
     def load(cls) -> "Settings":
         load_dotenv(find_dotenv(usecwd=True))
@@ -152,6 +157,9 @@ class Settings:
             # Gmail rejects anything over 25MB, so leave headroom for encoding.
             max_email_attachment_mb=_get_number("MAX_EMAIL_ATTACHMENT_MB", 15),
             error_notify_interval_hours=_get_number("ERROR_NOTIFY_INTERVAL_HOURS", 6),
+            slack_bot_token=_get("SLACK_BOT_TOKEN"),
+            slack_channel=_get("SLACK_CHANNEL"),
+            slack_mentions=[u.strip() for u in _get("SLACK_MENTIONS").split(",") if u.strip()],
         )
 
     @property
