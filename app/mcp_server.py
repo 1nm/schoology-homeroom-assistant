@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pymupdf
 import uvicorn
+from dotenv import find_dotenv, load_dotenv
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -252,6 +253,12 @@ def search(query: str, limit: int = 8, mode: str = "hybrid") -> list[dict]:
             if mode == "semantic":
                 return [{"error": "Run reindex() first: the semantic index is not built."}]
             logger.info("No semantic index yet, answering from keywords alone")
+        except Exception as exc:  # noqa: BLE001 - a missing key must not kill the tool
+            # Typically the embedding backend has no credentials. Keyword search
+            # still works, so degrade rather than fail the whole call.
+            if mode == "semantic":
+                return [{"error": f"Semantic search is unavailable: {exc}"}]
+            logger.warning("Semantic search unavailable (%s), answering from keywords alone", exc)
 
     if not meaning:
         return keyword[:limit]
@@ -494,6 +501,10 @@ def main() -> None:
 
     DATA_DIR = Path(args.data_dir).expanduser().resolve()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    # The embedding backend reads OPENAI_API_KEY from the environment; the sync
+    # pipeline gets it through config.py, so load the same .env here.
+    load_dotenv(DATA_DIR / ".env")
+    load_dotenv(find_dotenv(usecwd=True))
 
     if args.build_index:
         logger.info("Indexing %s", DATA_DIR)
