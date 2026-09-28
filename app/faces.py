@@ -38,6 +38,12 @@ DEFAULT_THRESHOLD = 0.45    # cosine on normed buffalo_l embeddings; ~0.4-0.5 is
 THUMB, COLS = 320, 6
 
 
+def default_min_face() -> float:
+    """Smallest face that still counts, as a share of the image's short edge: a
+    child in the back row of a class photo is not a photo *of* that child."""
+    return float(os.environ.get("FACE_MIN_SIZE", "0.10"))
+
+
 @dataclass
 class Face:
     box: list[int]
@@ -50,6 +56,7 @@ class Match:
     path: str
     score: float
     box: list[int] = field(default_factory=list)
+    face: float = 0.0  # face height as a share of the image's short edge
 
 
 class FaceIndex:
@@ -98,6 +105,13 @@ class FaceIndex:
             self._app.prepare(ctx_id=-1, det_size=(640, 640))
         return self._app
 
+    @staticmethod
+    def _image_size(path: Path) -> tuple[int, int]:
+        from PIL import Image, ImageOps
+
+        with Image.open(path) as image:
+            return ImageOps.exif_transpose(image).size
+
     def _detect(self, path: Path) -> list[Face]:
         import cv2
         from PIL import Image, ImageOps
@@ -136,10 +150,15 @@ class FaceIndex:
             except Exception as exc:  # noqa: BLE001 - one bad file must not stop the run
                 logger.warning("Could not read %s: %s", path, exc)
                 faces = []
+            try:
+                size = list(self._image_size(path))
+            except Exception:  # noqa: BLE001
+                size = [0, 0]
             cache[self.relative(path)] = {
                 "boxes": [f.box for f in faces],
                 "scores": [f.score for f in faces],
                 "embeddings": np.array([f.embedding for f in faces], dtype="float32"),
+                "size": size,
             }
             if i % 25 == 0 or i == len(todo):
                 logger.info("Scanned %d/%d photos", i, len(todo))
@@ -245,16 +264,28 @@ class FaceIndex:
         best = int(np.argmax(positive))
         return float(positive[best]), best
 
+    def _face_share(self, rel: str, entry: dict, box: list[int]) -> float:
+        size = entry.get("size") or [0, 0]
+        if not size[0]:
+            try:
+                size = list(self._image_size(self.data_dir / rel))
+            except Exception:  # noqa: BLE001
+                return 0.0
+            entry["size"] = size
+        return round((box[3] - box[1]) / max(1, min(size)), 4)
+
     def match(self, person: str, threshold: float = DEFAULT_THRESHOLD,
-              paths: list[Path] | None = None) -> list[Match]:
+              paths: list[Path] | None = None, min_face: float | None = None) -> list[Match]:
         """Photos where `person` appears (score = best similarity to any reference).
 
         Records every judged photo (matched or not) so later runs only see new ones;
-        pass `paths` to restrict, e.g. to what a sync just downloaded.
+        pass `paths` to restrict, e.g. to what a sync just downloaded. The record
+        keeps the face's size too, so `min_face` can be changed without re-judging.
         """
         people = self.people()
         if person not in people:
             raise KeyError(f"Unknown person {person!r}; run learn first")
+        min_face = default_min_face() if min_face is None else min_face
         cache = self._load_cache()
         judged = self.matches()
         seen = judged.setdefault(person, {})
@@ -268,18 +299,23 @@ class FaceIndex:
                 seen[rel] = {"score": 0.0}
                 continue
             score, best_face = self._score(people[person], entry["embeddings"])
-            seen[rel] = {"score": round(score, 4), "box": entry["boxes"][best_face]}
-            if score >= threshold:
-                found.append(Match(rel, round(score, 4), entry["boxes"][best_face]))
+            box = entry["boxes"][best_face]
+            share = self._face_share(rel, entry, box)
+            seen[rel] = {"score": round(score, 4), "box": box, "face": share}
+            if score >= threshold and share >= min_face:
+                found.append(Match(rel, round(score, 4), box, share))
         self._write(self._matches_path, judged)
         return sorted(found, key=lambda m: m.path)
 
-    def photos_of(self, person: str, threshold: float = DEFAULT_THRESHOLD) -> list[Match]:
+    def photos_of(self, person: str, threshold: float = DEFAULT_THRESHOLD,
+                  min_face: float | None = None) -> list[Match]:
         """Recorded matches, no detection: what the bot and the mail read."""
+        min_face = default_min_face() if min_face is None else min_face
         recorded = self.matches().get(person, {})
         return sorted(
-            (Match(p, v["score"], v.get("box", [])) for p, v in recorded.items()
-             if v["score"] >= threshold),
+            (Match(p, v["score"], v.get("box", []), v.get("face", 0.0))
+             for p, v in recorded.items()
+             if v["score"] >= threshold and v.get("face", 0.0) >= min_face),
             key=lambda m: m.path,
         )
 
@@ -302,8 +338,10 @@ def _font(size: int):
     return ImageFont.load_default(size=size)
 
 
-def contact_sheet(data_dir: Path, matches: list[Match], out: Path, label: bool = True) -> Path:
-    """Numbered thumbnails of the matched photos, the face boxed, for a quick review."""
+def contact_sheet(data_dir: Path, matches: list[Match], out: Path, label: bool = True,
+                  crop_face: bool = True, labels: list[str] | None = None) -> Path:
+    """Numbered thumbnails of the matched photos: cropped to the face for a review,
+    or the whole photo (crop_face=False) for a sheet meant to be looked at."""
     from PIL import Image, ImageDraw, ImageOps
 
     rows = max(1, (len(matches) + COLS - 1) // COLS)
@@ -312,7 +350,7 @@ def contact_sheet(data_dir: Path, matches: list[Match], out: Path, label: bool =
     font = _font(30)
     for i, m in enumerate(matches):
         image = ImageOps.exif_transpose(Image.open(data_dir / m.path)).convert("RGB")
-        if m.box:
+        if crop_face and m.box:
             x0, y0, x1, y1 = m.box
             pad = int(max(x1 - x0, y1 - y0) * 0.35)
             crop = image.crop((max(0, x0 - pad), max(0, y0 - pad), x1 + pad, y1 + pad))
@@ -322,7 +360,7 @@ def contact_sheet(data_dir: Path, matches: list[Match], out: Path, label: bool =
         x, y = (i % COLS) * THUMB, (i // COLS) * THUMB
         sheet.paste(thumb, (x, y))
         if label:
-            text = f"{i + 1}  {m.score:.2f}"
+            text = labels[i] if labels else f"{i + 1}  {m.score:.2f}"
             draw.rectangle([x, y, x + 12 + 16 * len(text), y + 36], fill="black")
             draw.text((x + 6, y + 2), text, fill="yellow", font=font)
     out.parent.mkdir(parents=True, exist_ok=True)

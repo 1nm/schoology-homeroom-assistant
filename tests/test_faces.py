@@ -170,3 +170,14 @@ def test_review_skips_a_reference_that_barely_resembles_the_child(archive):
     report = archive.review("kid", accepted=["materials/Photos/Week 4 (September)/IMG_4.jpg"],
                             rejected=[])
     assert report["added"] == 0 and report["skipped_low_quality"] == 1
+
+
+def test_small_faces_are_recorded_but_not_reported(archive, monkeypatch):
+    archive.learn("kid", faces._resolve_marks(archive, ["Week 4:1,2"]))
+    # Fixture photos are 40x30 and every box is 10px tall: a 1/3 share.
+    assert [Path(m.path).name for m in archive.match("kid", 0.6, min_face=0.5)] == []
+    recorded = archive.matches()["kid"]["materials/Photos/Week 4 (September)/IMG_1.jpg"]
+    assert recorded["face"] == pytest.approx(10 / 30, abs=0.01)
+    assert len(archive.photos_of("kid", 0.6, min_face=0.3)) == 4
+    monkeypatch.setenv("FACE_MIN_SIZE", "0.5")
+    assert archive.photos_of("kid", 0.6) == []

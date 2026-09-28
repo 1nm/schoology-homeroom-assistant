@@ -176,14 +176,14 @@ def find_people(settings: Settings, album_report: materials.SyncReport) -> dict[
     index.scan(new_photos)
     hits = {}
     for person in people:
-        found = index.match(person, settings.face_threshold, new_photos)
+        found = index.match(person, settings.face_threshold, new_photos, settings.face_min_size)
         hits[person] = len(found)
         if not found:
             continue
         sheet = faces.contact_sheet(
             settings.data_dir, found,
             settings.data_dir / ".faces" / "sheets" / f"{person}-{datetime.now():%Y%m%d-%H%M}.jpg",
-            label=False,
+            label=False, crop_face=False,
         )
         albums = sorted({Path(m.path).parent.name for m in found})
         slack_notify.notify_photos(settings, person, len(found), albums, sheet)
