@@ -39,9 +39,16 @@ THUMB, COLS = 320, 6
 
 
 def default_min_face() -> float:
-    """Smallest face that still counts, as a share of the image's short edge: a
-    child in the back row of a class photo is not a photo *of* that child."""
-    return float(os.environ.get("FACE_MIN_SIZE", "0.10"))
+    """Smallest face that still counts, as a share of the image's short edge. Off by
+    default: a class photo is a photo of every child in it, however small."""
+    return float(os.environ.get("FACE_MIN_SIZE", "0"))
+
+
+def default_min_prominence() -> float:
+    """Smallest face relative to the largest face in the same photo. In a group shot
+    every face is about the same size; when a few faces dominate and this one is
+    small, the child was only in the background."""
+    return float(os.environ.get("FACE_MIN_PROMINENCE", "0.5"))
 
 
 @dataclass
@@ -57,6 +64,7 @@ class Match:
     score: float
     box: list[int] = field(default_factory=list)
     face: float = 0.0  # face height as a share of the image's short edge
+    prominence: float = 1.0  # face height relative to the largest face in the photo
 
 
 class FaceIndex:
@@ -275,7 +283,8 @@ class FaceIndex:
         return round((box[3] - box[1]) / max(1, min(size)), 4)
 
     def match(self, person: str, threshold: float = DEFAULT_THRESHOLD,
-              paths: list[Path] | None = None, min_face: float | None = None) -> list[Match]:
+              paths: list[Path] | None = None, min_face: float | None = None,
+              min_prominence: float | None = None) -> list[Match]:
         """Photos where `person` appears (score = best similarity to any reference).
 
         Records every judged photo (matched or not) so later runs only see new ones;
@@ -286,6 +295,7 @@ class FaceIndex:
         if person not in people:
             raise KeyError(f"Unknown person {person!r}; run learn first")
         min_face = default_min_face() if min_face is None else min_face
+        min_prominence = default_min_prominence() if min_prominence is None else min_prominence
         cache = self._load_cache()
         judged = self.matches()
         seen = judged.setdefault(person, {})
@@ -301,21 +311,27 @@ class FaceIndex:
             score, best_face = self._score(people[person], entry["embeddings"])
             box = entry["boxes"][best_face]
             share = self._face_share(rel, entry, box)
-            seen[rel] = {"score": round(score, 4), "box": box, "face": share}
-            if score >= threshold and share >= min_face:
-                found.append(Match(rel, round(score, 4), box, share))
+            tallest = max(b[3] - b[1] for b in entry["boxes"])
+            prominence = round((box[3] - box[1]) / max(1, tallest), 4)
+            seen[rel] = {"score": round(score, 4), "box": box, "face": share,
+                         "prominence": prominence}
+            if score >= threshold and share >= min_face and prominence >= min_prominence:
+                found.append(Match(rel, round(score, 4), box, share, prominence))
         self._write(self._matches_path, judged)
         return sorted(found, key=lambda m: m.path)
 
     def photos_of(self, person: str, threshold: float = DEFAULT_THRESHOLD,
-                  min_face: float | None = None) -> list[Match]:
+                  min_face: float | None = None,
+                  min_prominence: float | None = None) -> list[Match]:
         """Recorded matches, no detection: what the bot and the mail read."""
         min_face = default_min_face() if min_face is None else min_face
+        min_prominence = default_min_prominence() if min_prominence is None else min_prominence
         recorded = self.matches().get(person, {})
         return sorted(
-            (Match(p, v["score"], v.get("box", []), v.get("face", 0.0))
+            (Match(p, v["score"], v.get("box", []), v.get("face", 0.0), v.get("prominence", 1.0))
              for p, v in recorded.items()
-             if v["score"] >= threshold and v.get("face", 0.0) >= min_face),
+             if v["score"] >= threshold and v.get("face", 0.0) >= min_face
+             and v.get("prominence", 1.0) >= min_prominence),
             key=lambda m: m.path,
         )
 

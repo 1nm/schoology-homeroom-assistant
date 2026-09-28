@@ -176,7 +176,8 @@ def find_people(settings: Settings, album_report: materials.SyncReport) -> dict[
     index.scan(new_photos)
     hits = {}
     for person in people:
-        found = index.match(person, settings.face_threshold, new_photos, settings.face_min_size)
+        found = index.match(person, settings.face_threshold, new_photos,
+                            settings.face_min_size, settings.face_min_prominence)
         hits[person] = len(found)
         if not found:
             continue

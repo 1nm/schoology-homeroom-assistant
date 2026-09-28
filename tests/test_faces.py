@@ -172,6 +172,19 @@ def test_review_skips_a_reference_that_barely_resembles_the_child(archive):
     assert report["added"] == 0 and report["skipped_low_quality"] == 1
 
 
+def test_a_child_in_the_background_is_recorded_but_not_reported(archive, monkeypatch):
+    archive.learn("kid", faces._resolve_marks(archive, ["Week 4:1,2"]))
+    album = "materials/Photos/Week 4 (September)/"
+    # In IMG_5 the other face is three times taller: the child is background there.
+    archive.scan()
+    archive._load_cache()[album + "IMG_5.jpg"]["boxes"] = [[0, 0, 10, 10], [0, 0, 30, 30]]
+    found = archive.match("kid", 0.6)
+    assert [Path(m.path).name for m in found] == ["IMG_1.jpg", "IMG_2.jpg", "IMG_3.jpg"]
+    recorded = archive.matches()["kid"][album + "IMG_5.jpg"]
+    assert recorded["prominence"] == pytest.approx(1 / 3, abs=0.01)
+    assert len(archive.photos_of("kid", 0.6, min_prominence=0.3)) == 4
+
+
 def test_small_faces_are_recorded_but_not_reported(archive, monkeypatch):
     archive.learn("kid", faces._resolve_marks(archive, ["Week 4:1,2"]))
     # Fixture photos are 40x30 and every box is 10px tall: a 1/3 share.

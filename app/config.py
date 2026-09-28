@@ -101,6 +101,7 @@ class Settings:
     # Face matching over the class albums (see faces.py); people are learned by CLI.
     face_threshold: float
     face_min_size: float
+    face_min_prominence: float
 
     @classmethod
     def load(cls) -> "Settings":
@@ -165,7 +166,8 @@ class Settings:
             slack_channel=_get("SLACK_CHANNEL"),
             slack_mentions=[u.strip() for u in _get("SLACK_MENTIONS").split(",") if u.strip()],
             face_threshold=_get_number("FACE_THRESHOLD", 0.45),
-            face_min_size=_get_number("FACE_MIN_SIZE", 0.10),
+            face_min_size=_get_number("FACE_MIN_SIZE", 0),
+            face_min_prominence=_get_number("FACE_MIN_PROMINENCE", 0.5),
         )
 
     @property
