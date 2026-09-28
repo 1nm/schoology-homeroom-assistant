@@ -9,6 +9,7 @@ already recorded, so there is nothing to retry.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import requests
 
@@ -75,6 +76,43 @@ def notify_materials(settings: Settings, new: list, updated: list) -> None:
     if settings.homeroom_course_url:
         lines.append(f"\n[View on Schoology]({settings.homeroom_course_url})")
     _safe(settings, "\n".join(lines), f"Course materials: {len(new)} new, {len(updated)} updated")
+
+
+def notify_photos(settings: Settings, person: str, count: int, albums: list[str],
+                  sheet: Path) -> None:
+    """New photos of one child: a contact sheet, with the parents mentioned."""
+    comment = (
+        f"{mention_line(settings)} 📷 {count} new photo{'s' if count != 1 else ''} of "
+        f"{person.title()} in {', '.join(albums)}"
+    ).strip()
+    try:
+        upload_file(settings, sheet, f"{person.title()} — {', '.join(albums)}", comment)
+    except Exception:  # noqa: BLE001 - see the module docstring
+        logger.exception("Could not upload the photo sheet to Slack")
+
+
+def upload_file(settings: Settings, path: Path, title: str, comment: str) -> None:
+    """The three-step external upload: get a URL, PUT the bytes, complete."""
+    if not enabled(settings):
+        return
+    headers = {"Authorization": f"Bearer {settings.slack_bot_token}"}
+    data = path.read_bytes()
+    ticket = requests.post(
+        "https://slack.com/api/files.getUploadURLExternal", headers=headers,
+        data={"filename": path.name, "length": len(data)}, timeout=settings.http_timeout,
+    ).json()
+    if not ticket.get("ok"):
+        raise RuntimeError(f"Slack refused the upload: {ticket.get('error')}")
+    requests.post(ticket["upload_url"], data=data, timeout=settings.http_timeout * 4
+                  ).raise_for_status()
+    done = requests.post(
+        "https://slack.com/api/files.completeUploadExternal", headers=headers,
+        json={"files": [{"id": ticket["file_id"], "title": title}],
+              "channel_id": settings.slack_channel, "initial_comment": comment},
+        timeout=settings.http_timeout,
+    ).json()
+    if not done.get("ok"):
+        raise RuntimeError(f"Slack refused to complete the upload: {done.get('error')}")
 
 
 def _safe(settings: Settings, markdown: str, fallback: str) -> None:

@@ -80,6 +80,24 @@ of the summary, with the parents mentioned -- along with a titles-only note when
 materials change. The mail stays the system of record: Slack is posted after the post
 is recorded, and a Slack failure is logged, not retried.
 
+## Finding one child in the albums
+
+The albums are photographed for the whole class. `faces.py` runs a face detector over
+every photo locally (insightface on the CPU; nothing leaves the machine) and learns a
+child from a few photos a parent points at -- the face that recurs across them:
+
+```shell
+python app/faces.py --data-dir ~/homeroom scan                       # once; then incremental
+python app/faces.py --data-dir ~/homeroom learn alex "Week 4 (:7,42" "Week 3 (:16"
+python app/faces.py --data-dir ~/homeroom match alex --sheet review.jpg
+```
+
+Numbers refer to a review contact sheet (photos of an album sorted by filename, 1-based).
+After that, every album sync checks the new photos for each learned person, records the
+result in `.faces/matches.json`, and posts a contact sheet of the hits to Slack. The MCP
+server exposes `list_people()`, `get_photos_of(person)` and `get_photos(..., person=)`.
+`FACE_THRESHOLD` (default 0.45) trades misses for false hits.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and fill it in. The five required variables are

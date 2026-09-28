@@ -29,6 +29,7 @@ from dotenv import find_dotenv, load_dotenv
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
+import faces
 import semantic
 
 logger = logging.getLogger(__name__)
@@ -402,10 +403,44 @@ def list_albums() -> list[dict]:
 
 
 @server.tool(
-    description="Show photos from one album, inline. Ask for an album by name (a "
-    "substring is enough, e.g. 'Week 1'); use offset to page through a big album."
+    description="Who has been learned by face, and how many archived photos each appears in."
 )
-def get_photos(album: str, limit: int = 4, offset: int = 0) -> list:
+def list_people() -> list[dict]:
+    index = faces.FaceIndex(DATA_DIR)
+    return [
+        {"person": person, "photos": len(index.photos_of(person))}
+        for person in index.people()
+    ]
+
+
+@server.tool(
+    description="Photos of one person across all albums, newest first, inline. Use this "
+    "when a parent asks for pictures of their child; page with offset."
+)
+def get_photos_of(person: str, limit: int = 4, offset: int = 0) -> list:
+    index = faces.FaceIndex(DATA_DIR)
+    if person.lower() not in {p.lower() for p in index.people()}:
+        return [f"Nobody called {person!r} has been learned. Call list_people()."]
+    matches = sorted(index.photos_of(person.lower()), key=lambda m: m.path, reverse=True)
+    window = matches[offset:offset + min(limit, MAX_INLINE_PHOTOS)]
+    parts: list = [
+        json.dumps(
+            {"person": person, "photos": len(matches), "offset": offset,
+             "showing": [{"path": m.path, "album": Path(m.path).parent.name,
+                          "score": m.score} for m in window]},
+            ensure_ascii=False, indent=2,
+        )
+    ]
+    parts.extend(_inline_image(DATA_DIR / m.path) for m in window)
+    return parts
+
+
+@server.tool(
+    description="Show photos from one album, inline. Ask for an album by name (a "
+    "substring is enough, e.g. 'Week 1'); use offset to page through a big album, "
+    "and person (a learned name, see list_people) to keep only photos of that child."
+)
+def get_photos(album: str, limit: int = 4, offset: int = 0, person: str = "") -> list:
     root = _materials_dir() / "Photos"
     folders = [f for f in root.iterdir() if f.is_dir() and album.lower() in f.name.lower()] \
         if root.exists() else []
@@ -414,6 +449,9 @@ def get_photos(album: str, limit: int = 4, offset: int = 0) -> list:
 
     folder = folders[0]
     photos = sorted(f for f in folder.iterdir() if f.suffix.lower() in IMAGE_SUFFIXES)
+    if person:
+        wanted = {DATA_DIR / m.path for m in faces.FaceIndex(DATA_DIR).photos_of(person.lower())}
+        photos = [p for p in photos if p in wanted]
     window = photos[offset:offset + min(limit, MAX_INLINE_PHOTOS)]
     parts: list = [
         json.dumps(

@@ -10,6 +10,7 @@ never re-sends and never silently drops a post.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import logging
 import sys
 import traceback
@@ -20,6 +21,7 @@ import materials
 from auth import SchoologyAuth
 from config import ConfigError, Settings
 from mailer import notify_error, send_email
+import faces
 import slack_notify
 from schoology import Post, SchoologyClient
 from schoology_api import SchoologyAPI
@@ -160,6 +162,35 @@ def build_materials_html(
     return "\n".join(parts)
 
 
+def find_people(settings: Settings, album_report: materials.SyncReport) -> dict[str, int]:
+    """Look for every learned person in the photos this sync brought in, and post
+    a contact sheet of the hits to Slack. Returns {person: hits}."""
+    index = faces.FaceIndex(settings.data_dir)
+    people = index.people()
+    new_photos = [
+        c.path for c in album_report.changes
+        if c.path and c.path.suffix.lower() in faces.IMAGE_SUFFIXES
+    ]
+    if not people or not new_photos:
+        return {}
+    index.scan(new_photos)
+    hits = {}
+    for person in people:
+        found = index.match(person, settings.face_threshold, new_photos)
+        hits[person] = len(found)
+        if not found:
+            continue
+        sheet = faces.contact_sheet(
+            settings.data_dir, found,
+            settings.data_dir / ".faces" / "sheets" / f"{person}-{datetime.now():%Y%m%d-%H%M}.jpg",
+            label=False,
+        )
+        albums = sorted({Path(m.path).parent.name for m in found})
+        slack_notify.notify_photos(settings, person, len(found), albums, sheet)
+    logger.info("Faces: %s", ", ".join(f"{k}={v}" for k, v in hits.items()))
+    return hits
+
+
 def sync_materials(
     settings: Settings, state: State, dry_run: bool = False, no_bcc: bool = False
 ) -> None:
@@ -192,6 +223,11 @@ def sync_materials(
         report.items_seen += album_report.items_seen
         report.files_downloaded += album_report.files_downloaded
         report.bytes_downloaded += album_report.bytes_downloaded
+        if not dry_run:
+            try:
+                find_people(settings, album_report)
+            except Exception:
+                logger.exception("Face matching failed")
     logger.info(
         "Materials: %d items, %d new, %d updated, %d downloaded (%.0f MB)",
         report.items_seen, len(report.new), len(report.updated),

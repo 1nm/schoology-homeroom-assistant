@@ -98,6 +98,9 @@ class Settings:
     slack_channel: str
     slack_mentions: list[str]
 
+    # Face matching over the class albums (see faces.py); people are learned by CLI.
+    face_threshold: float
+
     @classmethod
     def load(cls) -> "Settings":
         load_dotenv(find_dotenv(usecwd=True))
@@ -160,6 +163,7 @@ class Settings:
             slack_bot_token=_get("SLACK_BOT_TOKEN"),
             slack_channel=_get("SLACK_CHANNEL"),
             slack_mentions=[u.strip() for u in _get("SLACK_MENTIONS").split(",") if u.strip()],
+            face_threshold=_get_number("FACE_THRESHOLD", 0.45),
         )
 
     @property

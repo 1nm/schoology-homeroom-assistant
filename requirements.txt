@@ -6,3 +6,7 @@ langchain
 langchain-openai
 markdown2
 pymupdf
+pillow
+insightface
+onnxruntime
+opencv-python-headless
