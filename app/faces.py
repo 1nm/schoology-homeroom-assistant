@@ -191,6 +191,60 @@ class FaceIndex:
         return {"person": person, "references": len(refs), "photos_given": len(photo_paths),
                 "unsupported": sorted(set(photo_paths) - {p for p, _ in refs})}
 
+    def review(self, person: str, accepted: list[str], rejected: list[str],
+               min_reference_quality: float = 0.5) -> dict:
+        """Fold a parent's verdicts back in: the child's face in each accepted photo
+        becomes a reference (if it resembles the existing ones well enough -- a
+        blurred profile makes a reference that matches everybody), and the face that
+        fooled us in each rejected photo becomes a counter-example. Every recorded
+        verdict is then recomputed."""
+        people = self.people()
+        entry = people[person]
+        refs = np.array(entry["embeddings"], dtype="float32")
+        cache = self._load_cache()
+
+        def best_face(rel: str) -> tuple[np.ndarray, float, int]:
+            embeddings = cache[rel]["embeddings"]
+            sims = (embeddings @ refs.T).max(axis=1)
+            j = int(np.argmax(sims))
+            return embeddings[j], float(sims[j]), j
+
+        added = skipped = 0
+        known = {(r["path"], r["face"]) for r in entry["references"]}
+        for rel in accepted:
+            emb, sim, j = best_face(rel)
+            if (rel, j) in known:
+                continue
+            if sim < min_reference_quality:
+                skipped += 1
+                continue
+            entry["references"].append({"path": rel, "face": j})
+            entry["embeddings"].append(emb.tolist())
+            added += 1
+        negatives = entry.setdefault("rejected", [])
+        for rel in rejected:
+            emb, _, j = best_face(rel)
+            negatives.append({"path": rel, "face": j, "embedding": emb.tolist()})
+        self._write(self._people_path, people)
+
+        rescored = self.match(person, paths=[self.data_dir / p for p in self.matches().get(person, {})])
+        return {"person": person, "references": len(entry["references"]), "added": added,
+                "skipped_low_quality": skipped, "rejected": len(negatives),
+                "matches_now": len(rescored)}
+
+    def _score(self, person_entry: dict, embeddings: np.ndarray) -> tuple[float, int]:
+        """Best (similarity, face index) for one photo. A face that resembles a known
+        counter-example more than it resembles the references does not count."""
+        refs = np.array(person_entry["embeddings"], dtype="float32")
+        positive = (embeddings @ refs.T).max(axis=1)              # per face
+        rejected = person_entry.get("rejected") or []
+        if rejected:
+            negs = np.array([r["embedding"] for r in rejected], dtype="float32")
+            negative = (embeddings @ negs.T).max(axis=1)
+            positive = np.where(negative > positive, 0.0, positive)
+        best = int(np.argmax(positive))
+        return float(positive[best]), best
+
     def match(self, person: str, threshold: float = DEFAULT_THRESHOLD,
               paths: list[Path] | None = None) -> list[Match]:
         """Photos where `person` appears (score = best similarity to any reference).
@@ -201,7 +255,6 @@ class FaceIndex:
         people = self.people()
         if person not in people:
             raise KeyError(f"Unknown person {person!r}; run learn first")
-        refs = np.array(people[person]["embeddings"], dtype="float32")
         cache = self._load_cache()
         judged = self.matches()
         seen = judged.setdefault(person, {})
@@ -211,13 +264,10 @@ class FaceIndex:
             if rel not in cache:
                 self.scan([path])
             entry = cache[rel]
-            embeddings = entry["embeddings"]
-            if len(embeddings) == 0:
+            if len(entry["embeddings"]) == 0:
                 seen[rel] = {"score": 0.0}
                 continue
-            sims = embeddings @ refs.T                     # faces x references
-            best_face = int(np.argmax(sims.max(axis=1)))
-            score = float(sims[best_face].max())
+            score, best_face = self._score(people[person], entry["embeddings"])
             seen[rel] = {"score": round(score, 4), "box": entry["boxes"][best_face]}
             if score >= threshold:
                 found.append(Match(rel, round(score, 4), entry["boxes"][best_face]))
@@ -237,17 +287,29 @@ class FaceIndex:
 # --- contact sheets -------------------------------------------------------------
 
 
+def _font(size: int):
+    from PIL import ImageFont
+
+    for candidate in (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",   # Debian
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",       # macOS
+        "/System/Library/Fonts/Helvetica.ttc",
+    ):
+        try:
+            return ImageFont.truetype(candidate, size)
+        except OSError:
+            continue
+    return ImageFont.load_default(size=size)
+
+
 def contact_sheet(data_dir: Path, matches: list[Match], out: Path, label: bool = True) -> Path:
     """Numbered thumbnails of the matched photos, the face boxed, for a quick review."""
-    from PIL import Image, ImageDraw, ImageFont, ImageOps
+    from PIL import Image, ImageDraw, ImageOps
 
     rows = max(1, (len(matches) + COLS - 1) // COLS)
     sheet = Image.new("RGB", (COLS * THUMB, rows * THUMB), "white")
     draw = ImageDraw.Draw(sheet)
-    try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
-    except OSError:
-        font = ImageFont.load_default()
+    font = _font(30)
     for i, m in enumerate(matches):
         image = ImageOps.exif_transpose(Image.open(data_dir / m.path)).convert("RGB")
         if m.box:
@@ -299,6 +361,14 @@ def main(argv: list[str] | None = None) -> None:
     match.add_argument("person")
     match.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
     match.add_argument("--sheet", help="write a review contact sheet here")
+    review = sub.add_parser(
+        "review", help="fold verdicts on a review sheet back in: the numbers given are "
+        "NOT the person, every other photo on that sheet is",
+    )
+    review.add_argument("person")
+    review.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD,
+                        help="the threshold the sheet was made with")
+    review.add_argument("--reject", default="", help='sheet numbers, e.g. "13,14,19-27"')
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -315,6 +385,15 @@ def main(argv: list[str] | None = None) -> None:
                          ensure_ascii=False))
         if args.sheet and found:
             print("sheet:", contact_sheet(index.data_dir, found, Path(args.sheet)))
+    elif args.command == "review":
+        on_sheet = index.photos_of(args.person, args.threshold)   # same order as the sheet
+        rejected = set()
+        for part in filter(None, args.reject.replace(" ", "").split(",")):
+            lo, _, hi = part.partition("-")
+            rejected.update(range(int(lo), int(hi or lo) + 1))
+        accepted = [m.path for i, m in enumerate(on_sheet, 1) if i not in rejected]
+        wrong = [m.path for i, m in enumerate(on_sheet, 1) if i in rejected]
+        print(json.dumps(index.review(args.person, accepted, wrong), indent=1))
 
 
 if __name__ == "__main__":

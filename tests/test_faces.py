@@ -144,3 +144,29 @@ def test_upload_walks_the_three_steps(settings, monkeypatch, tmp_path):
     done = calls[2][1]["json"]
     assert done["channel_id"] == "C1" and done["files"] == [{"id": "F1", "title": "Kid — Week 4"}]
     assert done["initial_comment"].startswith("<@U1>") and "2 new photos of Kid" in done["initial_comment"]
+
+
+def test_review_adds_references_and_counter_examples(archive):
+    archive.learn("kid", faces._resolve_marks(archive, ["Week 4:1,2"]))
+    archive.match("kid", threshold=0.6)
+    album = "materials/Photos/Week 4 (September)/"
+    # A parent says IMG_5 is the child too, and IMG_4 (OTHER + THIRD) is not.
+    report = archive.review("kid", accepted=[album + "IMG_5.jpg"], rejected=[album + "IMG_4.jpg"])
+
+    assert report["added"] == 1 and report["rejected"] == 1
+    people = archive.people()["kid"]
+    assert len(people["references"]) == 3 and len(people["rejected"]) == 1
+    # The rejected face is now a counter-example: a photo of only that face scores 0.
+    counter = np.array([people["rejected"][0]["embedding"]], dtype="float32")
+    assert archive._score(people, counter)[0] == 0.0
+    # The child still matches, and every recorded verdict was recomputed.
+    assert [Path(m.path).name for m in archive.photos_of("kid", 0.6)] == \
+        ["IMG_1.jpg", "IMG_2.jpg", "IMG_3.jpg", "IMG_5.jpg"]
+
+
+def test_review_skips_a_reference_that_barely_resembles_the_child(archive):
+    archive.learn("kid", faces._resolve_marks(archive, ["Week 4:1,2"]))
+    archive.match("kid", threshold=0.6)
+    report = archive.review("kid", accepted=["materials/Photos/Week 4 (September)/IMG_4.jpg"],
+                            rejected=[])
+    assert report["added"] == 0 and report["skipped_low_quality"] == 1
