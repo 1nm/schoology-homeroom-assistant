@@ -162,12 +162,9 @@ def build_materials_html(
     return "\n".join(parts)
 
 
-SHEET_FROM = 4  # this many new photos or more go out as one contact sheet
-
-
 def find_people(settings: Settings, album_report: materials.SyncReport) -> dict[str, int]:
     """Look for every learned person in the photos this sync brought in, and post
-    a contact sheet of the hits to Slack. Returns {person: hits}."""
+    the hits to Slack. Returns {person: hits}."""
     index = faces.FaceIndex(settings.data_dir)
     people = index.people()
     new_photos = [
@@ -184,19 +181,15 @@ def find_people(settings: Settings, album_report: materials.SyncReport) -> dict[
         hits[person] = len(found)
         if not found:
             continue
-        out = settings.data_dir / ".faces" / "sheets"
+        # The photos themselves, downscaled, reframed where the child was in the
+        # background. A sheet was tried and rejected: parents want the pictures.
+        out = settings.data_dir / ".faces" / "sent"
+        out.mkdir(parents=True, exist_ok=True)
         stamp = f"{person}-{datetime.now():%Y%m%d-%H%M}"
-        if len(found) <= SHEET_FROM:
-            # A few photos are worth seeing full size, reframed where the child
-            # was in the background; more than that reads better as one sheet.
-            files = []
-            for i, m in enumerate(found, 1):
-                out.mkdir(parents=True, exist_ok=True)
-                files.append(out / f"{stamp}-{i}.jpg")
-                faces.render(settings.data_dir, m, 1600).save(files[-1], "JPEG", quality=85)
-        else:
-            files = [faces.contact_sheet(settings.data_dir, found, out / f"{stamp}.jpg",
-                                         label=False, crop_face=False)]
+        files = []
+        for i, m in enumerate(found, 1):
+            files.append(out / f"{stamp}-{i}.jpg")
+            faces.render(settings.data_dir, m, 1600).save(files[-1], "JPEG", quality=85)
         albums = sorted({Path(m.path).parent.name for m in found})
         slack_notify.notify_photos(settings, person, len(found), albums, files)
     logger.info("Faces: %s", ", ".join(f"{k}={v}" for k, v in hits.items()))

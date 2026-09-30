@@ -94,7 +94,8 @@ python app/faces.py --data-dir ~/homeroom match alex --sheet review.jpg
 
 Numbers refer to a review contact sheet (photos of an album sorted by filename, 1-based).
 After that, every album sync checks the new photos for each learned person, records the
-result in `.faces/matches.json`, and posts a contact sheet of the hits to Slack. The MCP
+result in `.faces/matches.json`, and posts the hits to Slack as photos (reframed around
+the child when they were only in the background). The MCP
 server exposes `list_people()`, `get_photos_of(person)` and `get_photos(..., person=)`.
 `FACE_THRESHOLD` (default 0.45) trades misses for false hits.
 

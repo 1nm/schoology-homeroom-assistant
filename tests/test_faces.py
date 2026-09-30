@@ -111,9 +111,26 @@ def test_sync_posts_a_sheet_of_new_photos_of_each_person(archive, settings, monk
     assert len(uploads) == 1
     person, count, albums, files = uploads[0]
     assert (person, count, albums) == ("kid", 1, ["Week 4 (September)"])
-    assert len(files) == 1 and files[0].exists(), "one photo goes out as itself, not a sheet"
+    assert len(files) == 1 and files[0].exists(), "the photo goes out as itself, not a sheet"
     with Image.open(files[0]) as photo:
         assert photo.size == (40, 30)
+
+
+def test_a_big_batch_goes_out_in_several_messages(settings, monkeypatch, tmp_path):
+    import dataclasses
+    settings = dataclasses.replace(settings, slack_bot_token="xoxb-t", slack_channel="C1",
+                                   slack_mentions=["U1"])
+    files = []
+    for i in range(23):
+        files.append(tmp_path / f"{i}.jpg")
+        files[-1].write_bytes(b"x")
+    messages = []
+    monkeypatch.setattr(slack_notify, "upload_files",
+                        lambda s, batch, comment: messages.append((len(batch), comment)))
+    slack_notify.notify_photos(settings, "kid", 23, ["Week 4"], files)
+    assert [n for n, _ in messages] == [10, 10, 3]
+    assert messages[0][1].startswith("<@U1>") and "23 new photos" in messages[0][1]
+    assert messages[1][1] == "(11–20 / 23)" and messages[2][1] == "(21–23 / 23)"
 
 
 def test_upload_walks_the_three_steps(settings, monkeypatch, tmp_path):

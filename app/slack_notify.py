@@ -78,17 +78,23 @@ def notify_materials(settings: Settings, new: list, updated: list) -> None:
     _safe(settings, "\n".join(lines), f"Course materials: {len(new)} new, {len(updated)} updated")
 
 
+FILES_PER_MESSAGE = 10
+
+
 def notify_photos(settings: Settings, person: str, count: int, albums: list[str],
                   files: list[Path]) -> None:
-    """New photos of one child -- the photos themselves, or one contact sheet --
-    with the parents mentioned."""
+    """New photos of one child, the photos themselves, with the parents mentioned.
+    A big batch goes out as several messages; only the first carries the mention."""
     comment = (
         f"{mention_line(settings)} 📷 {count} new photo{'s' if count != 1 else ''} of "
         f"{person.title()} in {', '.join(albums)}"
     ).strip()
     title = f"{person.title()} — {', '.join(albums)}"
     try:
-        upload_files(settings, [(f, title) for f in files], comment)
+        for start in range(0, len(files), FILES_PER_MESSAGE):
+            batch = files[start:start + FILES_PER_MESSAGE]
+            upload_files(settings, [(f, title) for f in batch],
+                         comment if start == 0 else f"({start + 1}–{start + len(batch)} / {count})")
     except Exception:  # noqa: BLE001 - see the module docstring
         logger.exception("Could not upload the photos to Slack")
 
