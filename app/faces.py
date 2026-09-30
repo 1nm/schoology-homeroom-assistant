@@ -392,8 +392,9 @@ def contact_sheet(data_dir: Path, matches: list[Match], out: Path, label: bool =
     or the whole photo (crop_face=False) for a sheet meant to be looked at."""
     from PIL import Image, ImageDraw, ImageOps
 
-    rows = max(1, (len(matches) + COLS - 1) // COLS)
-    sheet = Image.new("RGB", (COLS * THUMB, rows * THUMB), "white")
+    cols = max(1, min(COLS, len(matches)))
+    rows = max(1, (len(matches) + cols - 1) // cols)
+    sheet = Image.new("RGB", (cols * THUMB, rows * THUMB), "white")
     draw = ImageDraw.Draw(sheet)
     font = _font(30)
     for i, m in enumerate(matches):
@@ -407,7 +408,7 @@ def contact_sheet(data_dir: Path, matches: list[Match], out: Path, label: bool =
         else:
             crop = image
         thumb = ImageOps.fit(crop, (THUMB, THUMB))
-        x, y = (i % COLS) * THUMB, (i // COLS) * THUMB
+        x, y = (i % cols) * THUMB, (i // cols) * THUMB
         sheet.paste(thumb, (x, y))
         if label:
             text = labels[i] if labels else f"{i + 1}  {m.score:.2f}"

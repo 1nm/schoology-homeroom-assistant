@@ -88,7 +88,7 @@ def test_contact_sheet_boxes_the_face(archive, tmp_path):
     found = archive.match("kid", threshold=0.6)
     out = faces.contact_sheet(tmp_path, found, tmp_path / "sheet.jpg")
     with Image.open(out) as sheet:
-        assert sheet.size == (faces.COLS * faces.THUMB, faces.THUMB)
+        assert sheet.size == (len(found) * faces.THUMB, faces.THUMB), "no blank cells"
 
 
 def test_sync_posts_a_sheet_of_new_photos_of_each_person(archive, settings, monkeypatch):
@@ -97,7 +97,7 @@ def test_sync_posts_a_sheet_of_new_photos_of_each_person(archive, settings, monk
     archive.learn("kid", faces._resolve_marks(archive, ["Week 4:1,2"]))
     uploads = []
     monkeypatch.setattr(slack_notify, "notify_photos",
-                        lambda s, person, count, albums, sheet: uploads.append((person, count, albums, sheet)))
+                        lambda s, person, count, albums, files: uploads.append((person, count, albums, files)))
     album = archive.photos_dir / "Week 4 (September)"
     report = SyncReport(changes=[
         Change("new", "Week 4", "IMG_3.jpg", "IMG_3.jpg", path=album / "IMG_3.jpg"),
@@ -109,8 +109,11 @@ def test_sync_posts_a_sheet_of_new_photos_of_each_person(archive, settings, monk
 
     assert hits == {"kid": 1}
     assert len(uploads) == 1
-    person, count, albums, sheet = uploads[0]
-    assert (person, count, albums) == ("kid", 1, ["Week 4 (September)"]) and sheet.exists()
+    person, count, albums, files = uploads[0]
+    assert (person, count, albums) == ("kid", 1, ["Week 4 (September)"])
+    assert len(files) == 1 and files[0].exists(), "one photo goes out as itself, not a sheet"
+    with Image.open(files[0]) as photo:
+        assert photo.size == (40, 30)
 
 
 def test_upload_walks_the_three_steps(settings, monkeypatch, tmp_path):
@@ -136,7 +139,7 @@ def test_upload_walks_the_three_steps(settings, monkeypatch, tmp_path):
         return R({"ok": True})
 
     monkeypatch.setattr(slack_notify.requests, "post", post)
-    slack_notify.notify_photos(settings, "kid", 2, ["Week 4"], sheet)
+    slack_notify.notify_photos(settings, "kid", 2, ["Week 4"], [sheet])
 
     urls = [u for u, _ in calls]
     assert urls == ["https://slack.com/api/files.getUploadURLExternal", "https://up.example/x",

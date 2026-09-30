@@ -79,36 +79,46 @@ def notify_materials(settings: Settings, new: list, updated: list) -> None:
 
 
 def notify_photos(settings: Settings, person: str, count: int, albums: list[str],
-                  sheet: Path) -> None:
-    """New photos of one child: a contact sheet, with the parents mentioned."""
+                  files: list[Path]) -> None:
+    """New photos of one child -- the photos themselves, or one contact sheet --
+    with the parents mentioned."""
     comment = (
         f"{mention_line(settings)} 📷 {count} new photo{'s' if count != 1 else ''} of "
         f"{person.title()} in {', '.join(albums)}"
     ).strip()
+    title = f"{person.title()} — {', '.join(albums)}"
     try:
-        upload_file(settings, sheet, f"{person.title()} — {', '.join(albums)}", comment)
+        upload_files(settings, [(f, title) for f in files], comment)
     except Exception:  # noqa: BLE001 - see the module docstring
-        logger.exception("Could not upload the photo sheet to Slack")
+        logger.exception("Could not upload the photos to Slack")
 
 
 def upload_file(settings: Settings, path: Path, title: str, comment: str) -> None:
-    """The three-step external upload: get a URL, PUT the bytes, complete."""
+    upload_files(settings, [(path, title)], comment)
+
+
+def upload_files(settings: Settings, files: list[tuple[Path, str]], comment: str) -> None:
+    """The three-step external upload, for one message holding all the files:
+    get a URL per file, PUT the bytes, then complete them together."""
     if not enabled(settings):
         return
     headers = {"Authorization": f"Bearer {settings.slack_bot_token}"}
-    data = path.read_bytes()
-    ticket = requests.post(
-        "https://slack.com/api/files.getUploadURLExternal", headers=headers,
-        data={"filename": path.name, "length": len(data)}, timeout=settings.http_timeout,
-    ).json()
-    if not ticket.get("ok"):
-        raise RuntimeError(f"Slack refused the upload: {ticket.get('error')}")
-    requests.post(ticket["upload_url"], data=data, timeout=settings.http_timeout * 4
-                  ).raise_for_status()
+    uploaded = []
+    for path, title in files:
+        data = path.read_bytes()
+        ticket = requests.post(
+            "https://slack.com/api/files.getUploadURLExternal", headers=headers,
+            data={"filename": path.name, "length": len(data)}, timeout=settings.http_timeout,
+        ).json()
+        if not ticket.get("ok"):
+            raise RuntimeError(f"Slack refused the upload: {ticket.get('error')}")
+        requests.post(ticket["upload_url"], data=data, timeout=settings.http_timeout * 4
+                      ).raise_for_status()
+        uploaded.append({"id": ticket["file_id"], "title": title})
     done = requests.post(
         "https://slack.com/api/files.completeUploadExternal", headers=headers,
-        json={"files": [{"id": ticket["file_id"], "title": title}],
-              "channel_id": settings.slack_channel, "initial_comment": comment},
+        json={"files": uploaded, "channel_id": settings.slack_channel,
+              "initial_comment": comment},
         timeout=settings.http_timeout,
     ).json()
     if not done.get("ok"):
