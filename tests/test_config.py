@@ -44,3 +44,25 @@ class TestSettings:
 
     def test_base_url(self, settings):
         assert settings.base_url == "https://example.schoology.com"
+
+
+class TestModels:
+    def test_claude_is_the_default_provider(self, settings):
+        assert settings.llm_provider == "claude"
+        assert (settings.summary_model, settings.translation_model) == ("opus", "sonnet")
+
+    def test_openai_keeps_its_own_default_models(self, settings, monkeypatch):
+        import config
+
+        monkeypatch.setenv("LLM_PROVIDER", "OpenAI")
+        loaded = config.Settings.load()
+        assert loaded.llm_provider == "openai"
+        assert (loaded.summary_model, loaded.translation_model) == ("gpt-5.4", "gpt-4o")
+
+    def test_explicit_models_win(self, settings, monkeypatch):
+        import config
+
+        monkeypatch.setenv("SUMMARY_MODEL", "sonnet")
+        monkeypatch.setenv("TRANSLATION_MODEL", "haiku")
+        loaded = config.Settings.load()
+        assert (loaded.summary_model, loaded.translation_model) == ("sonnet", "haiku")

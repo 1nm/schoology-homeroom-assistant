@@ -27,6 +27,9 @@ def isolated_env(monkeypatch):
         "BCC_EMAILS",
         "GOOGLE_APP_PASSWORD",
         "TRANSLATION_LANGUAGES",
+        "LLM_PROVIDER",
+        "SUMMARY_MODEL",
+        "TRANSLATION_MODEL",
         "DATA_DIR",
         "HEADLESS",
     ):

@@ -78,6 +78,7 @@ class Settings:
     app_password: str
 
     # Models
+    llm_provider: str
     summary_model: str
     translation_model: str
     translation_languages: list[str]
@@ -115,6 +116,12 @@ class Settings:
         app_password = _require("GOOGLE_APP_PASSWORD")
 
         homeroom_course_url = _get("HOMEROOM_COURSE_URL")
+        # claude: `claude -p` on the Claude subscription (see summarize.py); openai: the API.
+        llm_provider = _get("LLM_PROVIDER", "claude").strip().lower()
+        default_models = {
+            "claude": ("opus", "sonnet"),
+            "openai": ("gpt-5.4", "gpt-4o"),
+        }.get(llm_provider, ("", ""))
         bcc_raw = _get("BCC_EMAILS")
         languages = [
             lang.strip()
@@ -149,8 +156,9 @@ class Settings:
             receiver_email=_get("SUMMARY_RECEIVER_EMAIL") or sender_email,
             bcc_emails=[e.strip() for e in bcc_raw.split(",") if e.strip()],
             app_password=app_password,
-            summary_model=_get("SUMMARY_MODEL", "gpt-5.4"),
-            translation_model=_get("TRANSLATION_MODEL", "gpt-4o"),
+            llm_provider=llm_provider,
+            summary_model=_get("SUMMARY_MODEL") or default_models[0],
+            translation_model=_get("TRANSLATION_MODEL") or default_models[1],
             translation_languages=languages,
             data_dir=Path(_get("DATA_DIR") or Path.cwd()).resolve(),
             state_filename=_get("STATE_FILE", ".sadc.conf"),

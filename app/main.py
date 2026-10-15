@@ -96,9 +96,10 @@ def handle_post(
         f"{header}\n\n{post.content}\n\n{attachment_text}",
         settings.summary_model,
         posted_on=f"{posted_at:%A, %B %d, %Y}",
+        provider=settings.llm_provider,
     )
     translated = [
-        translate(summary, language, settings.translation_model)
+        translate(summary, language, settings.translation_model, provider=settings.llm_provider)
         for language in settings.translation_languages
     ]
     summaries = [markdown_to_html(text) for text in [summary, *translated]]

@@ -40,8 +40,8 @@ class FakeClient:
 def fake_pipeline(monkeypatch):
     """Stub out the model calls and SMTP; record what each post produced."""
     sent = []
-    monkeypatch.setattr(main, "summarize", lambda text, model, posted_on="": f"# AI Summary\n{text[:20]}")
-    monkeypatch.setattr(main, "translate", lambda content, language, model: f"[{language}] {content}")
+    monkeypatch.setattr(main, "summarize", lambda text, model, posted_on="", provider="claude": f"# AI Summary\n{text[:20]}")
+    monkeypatch.setattr(main, "translate", lambda content, language, model, provider="claude": f"[{language}] {content}")
     monkeypatch.setattr(main, "markdown_to_html", lambda md: f"<div>{md}</div>")
     def record(settings, subject, html, attachments=(), bcc=None):
         sent.append((subject, html, list(attachments), bcc))
@@ -176,7 +176,7 @@ class TestRun:
         notified = []
         monkeypatch.setattr(main, "notify_error", lambda settings, msg, *a: notified.append(msg))
 
-        def flaky(text, model, posted_on=""):
+        def flaky(text, model, posted_on="", provider="claude"):
             if "explode" in text:
                 raise RuntimeError("model refused")
             return "# AI Summary"

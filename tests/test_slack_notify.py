@@ -79,8 +79,8 @@ class FakeClient:
 
 
 def test_handle_post_notifies_slack_after_recording(settings, monkeypatch):
-    monkeypatch.setattr(main, "summarize", lambda text, model, posted_on="": "# Summary")
-    monkeypatch.setattr(main, "translate", lambda content, language, model: f"[{language}] {content}")
+    monkeypatch.setattr(main, "summarize", lambda text, model, posted_on="", provider="claude": "# Summary")
+    monkeypatch.setattr(main, "translate", lambda content, language, model, provider="claude": f"[{language}] {content}")
     monkeypatch.setattr(main, "send_email", lambda *a, **k: None)
     seen = []
     monkeypatch.setattr(

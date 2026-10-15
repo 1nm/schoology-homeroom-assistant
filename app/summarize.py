@@ -1,16 +1,29 @@
-"""Turning a homeroom post into the summary block the email carries."""
+"""Turning a homeroom post into the summary block the email carries.
+
+Two backends, picked by `LLM_PROVIDER`: "claude" runs the Claude Code CLI
+(`claude -p`) on the Claude subscription, authenticated by `claude login` or a
+CLAUDE_CODE_OAUTH_TOKEN; "openai" calls the API with OPENAI_API_KEY.
+"""
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import shutil
+import subprocess
 import time
+from pathlib import Path
 
 import markdown2
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
 logger = logging.getLogger(__name__)
+
+CLAUDE_TIMEOUT = 300  # seconds per call
+CLAUDE_SYSTEM_PROMPT = (
+    "You are a careful writing assistant. Follow the instructions in the message "
+    "exactly and reply with only the requested text: no preamble, no commentary."
+)
 
 PROMPT_TEMPLATE = """
 You are summarising a homeroom update sent by an elementary school teacher to the
@@ -103,19 +116,82 @@ TRANSLATION_PROMPT_TEMPLATE = """
 MAX_ATTEMPTS = 3
 
 
-def summarize(text: str, model: str, posted_on: str = "an unstated date") -> str:
-    chain = ChatPromptTemplate.from_template(PROMPT_TEMPLATE) | ChatOpenAI(model=model) | StrOutputParser()
-    return _invoke(chain, {"text": text, "posted_on": posted_on}, f"summary ({model})")
-
-
-def translate(markdown_content: str, language: str, model: str) -> str:
-    chain = (
-        ChatPromptTemplate.from_template(TRANSLATION_PROMPT_TEMPLATE)
-        | ChatOpenAI(model=model)
-        | StrOutputParser()
+def summarize(
+    text: str, model: str, posted_on: str = "an unstated date", provider: str = "claude"
+) -> str:
+    return _invoke(
+        PROMPT_TEMPLATE, {"text": text, "posted_on": posted_on}, model, provider,
+        f"summary ({provider}/{model})",
     )
-    return _invoke(chain, {"content": markdown_content, "language": language},
-                   f"{language} translation ({model})")
+
+
+def translate(markdown_content: str, language: str, model: str, provider: str = "claude") -> str:
+    return _invoke(
+        TRANSLATION_PROMPT_TEMPLATE, {"content": markdown_content, "language": language},
+        model, provider, f"{language} translation ({provider}/{model})",
+    )
+
+
+# --- backends -----------------------------------------------------------------
+
+def _complete(template: str, payload: dict, model: str, provider: str) -> str:
+    if provider == "claude":
+        return _claude(template.format(**payload), model)
+    if provider == "openai":
+        return _openai(template, payload, model)
+    raise ValueError(f"LLM_PROVIDER must be claude or openai, not {provider!r}")
+
+
+def _openai(template: str, payload: dict, model: str) -> str:
+    from langchain_core.output_parsers import StrOutputParser
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_openai import ChatOpenAI
+
+    chain = ChatPromptTemplate.from_template(template) | ChatOpenAI(model=model) | StrOutputParser()
+    return chain.invoke(payload)
+
+
+def _claude_bin() -> str:
+    # cron has a bare PATH; the installer puts claude in ~/.local/bin.
+    for candidate in (
+        os.environ.get("CLAUDE_BIN"),
+        shutil.which("claude"),
+        str(Path.home() / ".local" / "bin" / "claude"),
+    ):
+        if candidate and os.access(candidate, os.X_OK):
+            return candidate
+    raise FileNotFoundError("claude CLI not found; install it or set CLAUDE_BIN")
+
+
+def _claude(prompt: str, model: str) -> str:
+    """One `claude -p` call: no tools, none of this machine's settings, text in, text out."""
+    argv = [
+        _claude_bin(), "--print",
+        "--output-format", "json",
+        "--model", model,
+        "--system-prompt", CLAUDE_SYSTEM_PROMPT,
+        "--tools", "",
+        "--strict-mcp-config",
+        "--setting-sources", "",
+        "--no-session-persistence",
+    ]
+    env = dict(os.environ)
+    env.pop("CLAUDECODE", None)         # allow running from inside a Claude Code session
+    env.pop("ANTHROPIC_API_KEY", None)  # the CLI would prefer a key over the subscription
+    proc = subprocess.run(
+        argv, input=prompt, env=env, capture_output=True, text=True,
+        timeout=CLAUDE_TIMEOUT, check=False,
+    )
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"claude -p exited {proc.returncode}: {(proc.stderr or proc.stdout).strip()[-500:]}"
+        ) from exc
+    if result.get("is_error") or not result.get("result"):
+        raise RuntimeError(f"claude -p failed ({result.get('subtype')}): {str(result.get('result'))[:500]}")
+    logger.info("claude -p: %s turns, $%.4f", result.get("num_turns"), result.get("total_cost_usd") or 0)
+    return result["result"]
 
 
 def markdown_to_html(markdown_content: str) -> str:
@@ -124,12 +200,12 @@ def markdown_to_html(markdown_content: str) -> str:
     return markdown2.markdown(markdown_content, safe_mode="escape")
 
 
-def _invoke(chain, payload: dict, description: str) -> str:
+def _invoke(template: str, payload: dict, model: str, provider: str, description: str) -> str:
     """Model calls fail transiently often enough that one retry loop pays for itself."""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             logger.info("Requesting %s (attempt %d/%d)", description, attempt, MAX_ATTEMPTS)
-            return chain.invoke(payload)
+            return _complete(template, payload, model, provider)
         except Exception as exc:
             if attempt == MAX_ATTEMPTS:
                 raise
