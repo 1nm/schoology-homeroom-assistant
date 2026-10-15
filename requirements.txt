@@ -1,12 +1,32 @@
+# Everything runs from one venv: the sync (run.sh sync), the MCP server
+# (run.sh serve / reindex) and the Slack bot (run.sh bot).
+
+# sync: sign-in, feed, materials, mail
 requests
 selenium
 beautifulsoup4
 python-dotenv
-langchain
-langchain-openai
 markdown2
 pymupdf
 pillow
+
+# faces in the class albums (local, CPU)
 insightface
 onnxruntime
 opencv-python-headless
+
+# MCP server and semantic search (Qwen3-Embedding runs on onnxruntime)
+mcp
+uvicorn
+faiss-cpu
+numpy
+tokenizers
+huggingface_hub
+
+# Slack bot
+slack-bolt
+slack-sdk
+
+# only for LLM_PROVIDER=openai / EMBEDDING_BACKEND=openai
+langchain
+langchain-openai
