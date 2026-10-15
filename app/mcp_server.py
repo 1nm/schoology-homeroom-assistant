@@ -548,10 +548,11 @@ def main() -> None:
 
     DATA_DIR = Path(args.data_dir).expanduser().resolve()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    # The embedding backend reads OPENAI_API_KEY from the environment; the sync
-    # pipeline gets it through config.py, so load the same .env here.
+    # Settings (MCP_TOKEN, EMBEDDING_BACKEND, OPENAI_API_KEY for the openai backend)
+    # live in the data dir's .env, the same one the sync pipeline reads.
     load_dotenv(DATA_DIR / ".env")
     load_dotenv(find_dotenv(usecwd=True))
+    args.token = args.token or os.environ.get("MCP_TOKEN", "")  # .env is loaded only now
 
     if args.build_index:
         logger.info("Indexing %s", DATA_DIR)
@@ -562,6 +563,13 @@ def main() -> None:
     if not args.http:
         server.run()
         return
+
+    # A long-running server loads the embedding model once, up front, so the first
+    # question does not pay for it.
+    try:
+        _semantic_index().embedder
+    except Exception as exc:  # noqa: BLE001 - keyword search still works without it
+        logger.warning("Embedding model not loaded (%s); search falls back to keywords", exc)
 
     if args.host == "0.0.0.0":  # noqa: S104 - refused on purpose
         raise SystemExit("Refusing to bind 0.0.0.0: name the interface explicitly.")

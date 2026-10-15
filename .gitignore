@@ -608,3 +608,4 @@ posts/
 materials/
 .semantic/
 .textcache/
+.venv.*/
